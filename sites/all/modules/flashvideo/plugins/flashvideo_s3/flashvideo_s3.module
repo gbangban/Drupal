@@ -1,0 +1,431 @@
+<?php
+
+// $Id: flashvideo_s3.module,v 1.1.2.10 2007/08/16 22:44:48 arthuregg Exp $
+
+require_once('S3.php');
+
+define( "AMAZON_CLOUDFRONT_STATUS_READY", "Deployed" );
+define( "AMAZON_CLOUDFRONT_STATUS_DISABLED", "Disabled" );
+
+function _flashvideo_s3_getS3() {
+  static $access_key, $secret_key;
+
+  // If they do not have this enabled, then we will just return FALSE.
+  if (!variable_get('flashvideo_s3_enable', 0)) {
+    return FALSE;
+  }
+
+  // Get the access key.
+  if (!$access_key = variable_get('flashvideo_s3_key', NULL)) {
+    drupal_set_message(t('Error: Access Key is not Set'), 'error');
+    return FALSE;
+  }
+
+  // Get the secret key
+  if (!$secret_key = variable_get('flashvideo_s3_skey', NULL)) {
+    drupal_set_message(t('Error: Secret Key is not set'), 'error');
+    return FALSE;
+  }
+
+  // Create a new S3 storage object
+  $use_ssl = variable_get('flashvideo_s3_enable_ssl', 1) ? TRUE : FALSE;
+  $s3 = new S3($access_key, $secret_key, $use_ssl);  
+  return $s3;
+}
+
+function flashvideo_s3_configure()
+{
+   $needs_ssl = variable_get('flashvideo_s3_cloudfront', 0) || variable_get('flashvideo_s3_enable_ssl', 0);
+
+   if( $needs_ssl ) {
+	   // Check for CURL
+	   if ( !extension_loaded('curl') ) {
+	      drupal_set_message("You do not have the CURL extension loaded.  You need to install CURL in order to use the Amazon AWS plugin.", "error"); 	
+	   }	
+	
+	   // Set the bucket to not have underscores..
+	   $default_bucket = variable_get('flashvideo_s3_bucket', str_replace(' ', '-', $conf['site_name']));
+       variable_set( 'flashvideo_s3_bucket', str_replace('_', '-', $default_bucket) );	
+	
+	   /****  TO-DO:  FIND OUT WHY THIS DOESN'T WORK....  
+	   // Find the CURL config path...
+	   $curl_path = shell_exec('curl-config --ca 2>&1');
+	   
+	   // Now make sure that s3.amazonaws.com is added to the certificates.
+	   $command = 'curl -vv --cacert ' . $curl_path . ' https://s3.amazonaws.com:443';
+	   exec( $command . ' 2>&1');	
+	   
+	   // Add the CloudFront to the certificates.
+	   $command = 'curl -vv --cacert ' . $curl_path . ' https://cloudfront.amazonaws.com:443';
+	   exec( $command . ' 2>&1');	
+	   */
+   }   
+}
+
+/**
+ * Implementation of hook_form_alter().
+ */
+function flashvideo_s3_form_alter(&$form, $form_state, $form_id)  {
+  global $conf;
+
+  if ($form_id == 'flashvideo_settings_form') {
+  	flashvideo_s3_configure();
+  	
+    $form['flashvideo_s3'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Amazon S3 Configuration'),
+      '#collapsed' => TRUE,
+      '#collapsible' => TRUE,
+    );
+    $form['flashvideo_s3']['flashvideo_s3_enable'] = array(
+      '#type' => 'checkbox',
+      '#title' => t('Enable FlashVideo S3 support'),
+      '#default_value' => variable_get('flashvideo_s3_enable', 0),
+      '#description' => t('Enables S3 support for the FlashVideo module.'),
+    );
+    $form['flashvideo_s3']['flashvideo_s3_enable_ssl'] = array(
+      '#type' => 'checkbox',
+      '#title' => t('Use Secure Sockets Layer ( SSL )'),
+      '#default_value' => variable_get('flashvideo_s3_enable_ssl', 1),
+      '#description' => t('Enabling SSL will transfer all files over a secured socket layer ( https ).  This is highly recommended to keep your files safe and secure.  <strong>Important Note:  You must have the CURL library installed to use SSL.</strong>'),
+    );       
+    $form['flashvideo_s3']['flashvideo_s3_cloudfront'] = array(
+      '#type' => 'checkbox',
+      '#title' => t('Use Amazon\'s CloudFront ( CDN ) service.'),
+      '#default_value' => variable_get('flashvideo_s3_cloudfront', 0),
+      '#description' => t('Checking this check box will enable Amazon\'s CloudFront service for each media uploaded to the S3 server.  For more information about cloudfront, go to http://aws.amazon.com/cloudfront .  <strong>Important Note:  You must have the CURL library installed to use CloudFront.</strong>'),
+    );      
+    $form['flashvideo_s3']['flashvideo_s3_delete'] = array(
+      '#type' => 'checkbox',
+      '#title' => t('Delete Local files after move.'),
+      '#default_value' => variable_get('flashvideo_s3_delete', 0),
+      '#description' => t('Checking this check box will delete the files from the local file system after they have been moved to the Amazon S3 servers.'),
+    );
+    $form['flashvideo_s3']['flashvideo_s3_bucket'] = array(
+      '#type' => 'textfield',
+      '#title' => t('S3 Bucket'),
+      '#default_value' => variable_get('flashvideo_s3_bucket', str_replace(' ', '-', $conf['site_name'])),
+      '#description' => t('Note: This must be unique.'),
+    );
+    $form['flashvideo_s3']['flashvideo_s3_key'] = array(
+      '#type' => 'textfield',
+      '#title' => t('S3 Key'),
+      '#default_value' => variable_get('flashvideo_s3_key', ''),
+    );
+    $form['flashvideo_s3']['flashvideo_s3_skey'] = array(
+      '#type' => 'textfield',
+      '#title' => t('S3 Secret Key'),
+      '#default_value' => variable_get('flashvideo_s3_skey', ''),
+    );
+  }
+}
+
+/**
+ * flashvideo_s3_flashvideo_delete_file - deletes a file from s3
+ *
+ * @param $file Standard Drupal file object
+ *
+ * @returns a url to the amazon file
+ */
+function flashvideo_s3_flashvideo_delete_file($file) {
+
+  // Get the Amazon S3 object...
+  if (!variable_get('flashvideo_s3_enable', 0) || !($s3 = _flashvideo_s3_getS3())) {
+    return array();
+  }
+
+  // Get the path from the database and return it... if it does not exist, then just return FALSE.
+  $s3file = db_fetch_object( db_query('SELECT * FROM {flashvideo_s3} WHERE fid=%d', $file->fid) );
+
+  // Get the path from the database and return it... if it does not exist, then just return FALSE.
+  if ( $s3file && $s3file->bucket ) {
+
+    // Get the filename for the file on the Amazon S3 server.
+    $filename = basename($file->filepath);
+
+    // Delete the file from Amazon S3
+    if ( $s3->deleteObject( $s3file->bucket, $filename) ) {
+      drupal_set_message($file->filename .' has been deleted from the Amazon S3 server');
+
+      // See if they are using the CDN network.  If so, then we need to delete the distribution.
+      if( variable_get('flashvideo_s3_cloudfront', 0) ) {
+         if( ($retval = flashvideo_s3_delete_distribution( $s3file )) !== false ) {
+         	if( $retval == 'QUEUED' ) {
+	           drupal_set_message(t('Amazon CloudFront distribution delete queued.'));
+	           return TRUE;   
+         	}  
+         	else {    	
+               drupal_set_message(t('Amazon CloudFront distribution deleted.'));
+         	}
+         }
+         else {
+            drupal_set_message(t('Could not delete the Amazon CloudFront distribution.'), 'error');	
+         }	
+      }
+
+      // Delete the file from the Amazon S3 database table.
+      db_query('DELETE FROM {flashvideo_s3} WHERE fid = %d', $file->fid);
+
+      return TRUE;
+    }
+    else {
+      drupal_set_message(t('Could not delete file on Amazon S3 server.'), 'error');
+    }
+  }
+
+  return array();
+}
+
+/**
+ * flashvideo_s3_flashvideo_get_file - retrieves a file from s3
+ *
+ * @param $file Standard Drupal file object
+ *
+ * @returns a url to the amazon file
+ */
+
+function flashvideo_s3_flashvideo_get_file($file) {
+
+  // Get the Amazon S3 object...
+  if (!variable_get('flashvideo_s3_enable', 0) || !($s3 = _flashvideo_s3_getS3())) {
+    return array();
+  }
+
+  // Get the path from the database and return it... if it does not exist, then just return FALSE.
+  $s3file = db_fetch_object( db_query('SELECT * FROM {flashvideo_s3} WHERE fid=%d', $file->fid) );
+  if ( $s3file && $s3file->bucket ) {
+
+    // Get the filename for the file on the Amazon S3 server.
+    $filename = basename($file->filepath);
+
+    // If they wish to delete the local files, then we need to do this here...
+    if (variable_get('flashvideo_s3_delete', 0) && file_exists(getcwd() .'/'. $file->filepath)) {
+      // Delete the file
+      file_delete($file->filepath);
+    }
+
+    $fileurl = flashvideo_s3_is_distro_ready( $s3file ) ? 'http://' . $s3file->domain : ('http://s3.amazonaws.com/' . $s3file->bucket);
+    $filepath['file'] = $fileurl . '/'. $filename;
+    return $filepath;
+  }
+
+  return array();
+}
+
+/**
+ * flashvideo_s3_flashvideo_save_file - sends a file to s3
+ *
+ * @param $file Standard Drupal file object
+ *
+ * @returns a url to the amazon file
+ */
+
+function flashvideo_s3_flashvideo_save_file($file) {
+  global $conf;
+
+  // Get the Amazon S3 object...
+  if (!variable_get('flashvideo_s3_enable', 0) || !($s3 = _flashvideo_s3_getS3())) {
+    return array();
+  }
+
+  // Assign the Amazon S3 bucket name based off of the site name and the local path to the video file.
+  $bucket = variable_get('flashvideo_s3_bucket', str_replace(' ', '-', $conf['site_name']));
+  $bucket .= ($bucket == '') ? '' : '-';
+  $filepath = drupal_substr($file->filepath, 0, (strrpos($file->filepath, '/')));
+  $filepath = rtrim( $filepath, '/' );
+  $bucket .= str_replace('/', '-', $filepath);
+
+  // Retrieve a list of all the buckets for this account.
+  $buckets = $s3->listBuckets();
+  
+  // If this bucket is not in the list, then we will want to add this bucket.
+  if ( !$buckets || !(in_array( $bucket, $buckets ))) {
+    // Create the bucket.
+    drupal_set_message( $bucket );
+    if ( !$s3->putBucket($bucket, S3::ACL_PUBLIC_READ) ) {
+      drupal_set_message(t('S3::putBucket(): Unable to create bucket (it may already exist and/or be owned by someone else)'), 'error');
+      return array();
+    }
+  }
+
+  // Set the filename of this file.
+  $filename = basename($file->filepath);
+  $distribution = array();
+
+  // Now place the file on the server.
+  if ($s3->putObjectFile( (getcwd() .'/'. $file->filepath), $bucket, $filename, S3::ACL_PUBLIC_READ)) {  
+    // Now see if we need to create a CDN distribution...
+    if( variable_get('flashvideo_s3_cloudfront', 0) ) {
+       $distribution = flashvideo_s3_create_distribution( $bucket );
+       if( $distribution ) {
+          drupal_set_message(t('Amazon CloudFront distribution successfully created.'));
+       }
+       else {
+	      drupal_set_message(t('Failed to create distribution.'), 'error');
+       }    			
+    }
+  }
+  else {
+    drupal_set_message(t('Failed to place file on S3 server.'), 'error');
+    return array();
+  }
+
+  $did = $distribution ? $distribution['id'] : "";
+  $domain = $distribution ? $distribution['domain'] : "";
+
+  $sql = "INSERT INTO {flashvideo_s3} (fid, bucket, did, domain, status, operation) VALUES (%d, '%s', '%s', '%s', '%s', '%s')";
+  db_query( $sql, $file->fid, $bucket, $did, $domain, 'InProgress', 'ACTIVE' );
+  drupal_set_message($file->filename .' '. t('has been added to the Amazon S3 server'));
+  return TRUE;
+}
+
+/**
+ * Implementation of hook_cron
+ */
+function flashvideo_s3_cron()
+{
+   // Check to see if we have any pending deletes.
+   $result = db_query( "SELECT * FROM {flashvideo_s3}" );
+   $s3files = array();
+   while( $s3file = db_fetch_object( $result ) ) {
+   	 $s3files[] = $s3file;
+   }
+   
+   if( $s3files ) {
+   	  // Iterate through all of the files...
+      foreach( $s3files as $file ) {
+      	 // Try to delete the distribution...
+         if( ($file->operation == 'DELETE') ) {
+            if( (flashvideo_s3_delete_distribution( $file ) === true) ) {
+               // Now delete the file from the Amazon S3 database table.
+               db_query('DELETE FROM {flashvideo_s3} WHERE fid = %d', $file->fid);
+               drupal_set_message("Amazon CloudFront distribution deleted");
+            }     	
+         }   
+         else if( $file->status != AMAZON_CLOUDFRONT_STATUS_READY ) {
+         	
+         	// We need to update the status of this file to see if it is ready.
+         	flashvideo_s3_update_status( $file );
+         }	
+      }
+   }
+}
+
+/**
+ * Creates a distribution.
+ */
+function flashvideo_s3_create_distribution( $bucket, $cnames = array() ) 
+{
+   if( $bucket ) {
+      // Get the Amazon S3 object...
+      if (!variable_get('flashvideo_s3_enable', 0) || !($s3 = _flashvideo_s3_getS3())) {
+         return false;
+      }	
+		
+	  // Create the distribution.
+      if( ( $dist = $s3->createDistribution( $bucket, true, $cnames ) ) !== false ) {
+         return $dist;
+      }
+   }
+	
+   return false;
+}
+
+/**
+ * Updates a distribution.
+ */
+function flashvideo_s3_update_distribution( $distributionId, $enabled = false, $cnames = array() ) 
+{
+   if( $distributionId ) {
+      // Get the Amazon S3 object...
+      if (!variable_get('flashvideo_s3_enable', 0) || !($s3 = _flashvideo_s3_getS3())) {
+         return false;
+      }	
+		
+      // To enable/disable a distribution configuration:
+      if (($dist = $s3->getDistribution($distributionId)) !== false) {
+         $dist['enabled'] = $enabled;
+         $dist['comment'] = $enabled ? 'Enabled' : 'Disabled';
+         if (!isset($dist['cnames'])) $dist['cnames'] = array();
+         foreach ($cnames as $cname) $dist['cnames'][$cname] = $cname;
+         if( ($dist = $s3->updateDistribution($dist)) !== false ) {
+            return $dist;	
+         }
+      } 
+   }
+   return false;
+}
+
+/**
+ * Deletes a distribution.
+ */
+function flashvideo_s3_delete_distribution( $s3file ) 
+{
+   if( $s3file->did ) {
+      // Get the Amazon S3 object...
+      if (!variable_get('flashvideo_s3_enable', 0) || !($s3 = _flashvideo_s3_getS3())) {
+         return false;
+      }		
+      
+      if (($dist = $s3->getDistribution( $s3file->did )) !== false) {
+         // First check to see if the status is disabled..
+         if ( $s3file->status == AMAZON_CLOUDFRONT_STATUS_DISABLED ) {
+      	
+            // If the distro is ready and disabled, we can now finally delete it.
+            if( ($dist['status'] == AMAZON_CLOUDFRONT_STATUS_READY) && $s3->deleteDistribution( $dist ) ) {
+               return true;	
+            }
+         }
+      
+         // Check to see if the distribution is ready. ( Enabled and Ready ).
+         else if ( $dist['status'] == AMAZON_CLOUDFRONT_STATUS_READY ) {
+      	
+         	 // The first thing we need to do is disable the distribution, and mark it as a queued delete operation.
+            if( ($dist = flashvideo_s3_update_distribution( $s3file->did, false )) !== false ) {
+               db_query( "UPDATE {flashvideo_s3} SET operation='%s', status='%s' WHERE fid=%d", "DELETE", AMAZON_CLOUDFRONT_STATUS_DISABLED, $s3file->fid );
+               return 'QUEUED';
+            }
+         }
+	  
+	     // The distribution is not yet ready and is not disabled.  We need to queue it for a future delete operation.
+	     else {
+            // Add to the delete queue.	
+            db_query( "UPDATE {flashvideo_s3} SET operation='%s' WHERE fid=%d", "DELETE", $s3file->fid );
+            return 'QUEUED';	  		
+	     }
+      }
+   }
+	
+   return false;
+}
+
+/**
+ * Checks to see if a distribution is ready.
+ */
+function flashvideo_s3_update_status( $s3file )
+{
+   if( $s3file->did ) {
+      // Get the Amazon S3 object...
+      if (!variable_get('flashvideo_s3_enable', 0) || !($s3 = _flashvideo_s3_getS3())) {
+         return false;
+      }	   	
+   	
+      if (($dist = $s3->getDistribution( $s3file->did )) !== false) {
+         db_query("UPDATE {flashvideo_s3} SET status='%s' WHERE fid=%d", $dist['status'], $s3file->fid);
+         if( $dist['status'] == AMAZON_CLOUDFRONT_STATUS_READY ) {
+         	drupal_set_message( "Amazon CloudFront distribution {$s3file->did} is now ready" );
+         }
+         return $dist['status'];
+      }
+   }
+   
+   return '';
+}
+
+/**
+ * Checks to see if a distribution is ready.
+ */
+function flashvideo_s3_is_distro_ready( $s3file )
+{
+   return ($s3file->status == AMAZON_CLOUDFRONT_STATUS_READY);
+}

@@ -1,0 +1,279 @@
+/* @override http://qcommons-staging.local.funq.org:8888/sites/all/modules/quiz/quiz.css?R */
+
+/* $Id: quiz.css,v 1.10.2.27 2010/01/29 07:55:44 falcon Exp $ */
+
+/*
+ * Definitions that apply while viewing questions
+ */
+.question_type_name {
+  font-style: italic;
+}
+
+/*
+ * Definitions that apply while taking the quiz.
+ */
+#quiz_progress {
+  font-style: italic;
+  font-size: 80%;
+}
+
+span.multichoice_answer_text p {
+  display: inline;
+}
+
+/*
+ * Definitions that apply on the summary pages.
+ */
+.quiz_question_bullet {
+  font-weight: bold;
+  font-size: 120%;
+}
+
+#quiz_score_possible, #quiz_score_percent {
+  font-weight: bold;
+}
+
+.quiz_summary_question {
+  margin-bottom: 0.5em;
+}
+
+tr.quiz_summary_qrow {
+  background: transparent;
+}
+
+td.quiz_summary_qcell {
+  vertical-align: top;
+  padding: 1em 1em 0em 0em;
+}
+
+td.quiz_summary_qcell table tr {
+  background: transparent;
+}
+
+td.quiz_summary_qcell table td {
+  vertical-align: top;
+  padding: .5em;
+}
+
+.quiz_answer_feedback {
+  font-style: italic;
+}
+
+.quiz_summary_header {
+  font-weight: bold;
+}
+.quiz_summary_text {
+
+}
+div.multichoice_answer_correct {
+  padding: 5px;
+  border: 1px solid green;
+}
+div.multichoice_answer_incorrect {
+  padding: 5px;
+  border: 1px solid red;
+}
+
+.add-questions {
+  background: transparent url(images/add.png) no-repeat scroll 0% 10%;
+  padding: 0 0 1em 2em;
+}
+
+#export-table {
+  text-align: right;
+}
+
+.multichoice_answer_correct {
+  background-color: lightgreen;
+}
+
+.hidden-question {
+  display: none;
+}
+/*
+.quiz-question-browser-row, #quiz_question_browser_filters {
+  border: 0px solid #666;
+}
+*/
+
+.quiz-question-browser-row.odd {
+  background-color: #e7e7e7;
+}
+
+.quiz-question-browser-row.even {
+  background-color: #fbfbfb;
+}
+
+#quiz-question-browser-filters {
+  background-color: black;
+}
+#quiz-question-browser-filters td.active {
+/*  background-color: #202050; */
+  background-color: #666;
+}
+
+.quiz-question-browser-row.odd:not(.selected) td.active {
+  background-color: #e2e2f9;
+}
+
+.quiz-question-browser-row.even:not(.selected) td.active {
+  background-color: #f8f8ff;
+}
+
+.browser-table th {
+  border-bottom: 0px solid #666666;
+}
+
+.q-staying {
+  display: inline;
+  float: left;
+  margin-right: 8px;
+}
+
+.quiz-report-scoring {
+  float: right;
+}
+
+/* alpha 3 original CSS
+
+table.quiz-report-q-header {
+  border-style: none;
+  padding:0px;
+  margin:0px;
+  border:0px;
+  border-collapse: separate;
+}
+
+.quiz-report-score-cell {
+  width: 20%;
+  padding:0px;
+  margin:0px;
+  border:0px;
+}
+
+.quiz-report-q-cell, .quiz-report-score-cell div {
+  padding:0px;
+  margin:0px;
+  border:0px;
+}
+
+.quiz-report-score {
+  text-align: right;
+  margin: 0px;
+  padding: 0px;
+}
+
+.quiz-report-question {
+  margin-top: 0px;
+  margin-bottom: 40px;
+}
+
+.quiz-report-odd-td {
+  background-color:#f3f3f3;
+}
+.quiz-report-even-td {
+  background-color:#e9e9e9;
+}
+
+*/
+
+/*
+ * Definitions that apply on the quiz report pages.
+ */
+
+dl.quiz-report {
+  margin: 0;
+  padding: 0;
+}
+
+dl.quiz-report dt {
+  background: #eee;
+  border-top: solid 1px gray;
+    float: left;
+  padding-left: 5px;
+  width: 100%;
+}
+
+dl.quiz-report dt div.quiz-report-score-container {
+  border-right: solid 1px gray;
+  border-left: solid 1px gray;
+  border-bottom: solid 1px gray;
+  float: right;
+  padding: 4px 6px;
+}
+
+dl.quiz-report dt p {
+  clear: both ;
+  float: left;
+}
+
+dl.quiz-report dt p.quiz-report-question {
+  clear: none;
+}
+
+dl.quiz-report dt div.quiz-report-score-container span div.form-item {
+  display: inline;
+}
+
+dl.quiz-report dd {
+  margin: 10px 0 50px 0;
+  padding-left: 5px;
+}
+
+.quiz-report-skipped {
+  float: right;	
+}
+
+.q-correct {
+  background-color: #DDFFDD;
+}
+
+.q-wrong {
+  background-color: #FFCCCC;
+}
+
+.q-waiting {
+  background-color: #FFFFDD;
+}
+
+.q-skip-button {
+  background: 0 none;
+  border: 0 none;
+  color: #bb0000;
+}
+
+.q-skip-button:hover {
+  color: #ff0000;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.quiz-passed {
+  color: #00dd00;
+}
+
+.quiz-failed {
+  color: #dd0000;
+}
+
+#no-questions {
+  font-style: italic;
+}
+#quiz-view-table {
+  width: auto;
+  border-collapse: separate;
+  border: thin solid #555555;
+  padding: 0px;
+  margin: 0px;
+}
+#quiz-view-table td {
+  padding: 0px 3px 0px 3px;
+  margin: 0px;
+  line-height: 110%;
+}
+.quiz-view-table-title {
+  
+}
+.quiz-view-table-data {
+
+}

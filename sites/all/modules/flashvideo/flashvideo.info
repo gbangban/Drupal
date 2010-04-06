@@ -1,0 +1,13 @@
+; $Id: flashvideo.info,v 1.6.2.8 2009/04/18 03:31:14 attheshow Exp $
+name = FlashVideo
+description = Provides a mechanism for users to upload videos and have them automatically converted and displayed.
+package = FlashVideo
+core = 6.x
+
+
+; Information added by drupal.org packaging script on 2009-12-27
+version = "6.x-1.5"
+core = "6.x"
+project = "flashvideo"
+datestamp = "1261875329"
+

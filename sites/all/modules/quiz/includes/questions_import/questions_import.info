@@ -1,0 +1,15 @@
+; $Id: questions_import.info,v 1.2.2.4 2009/08/03 19:14:33 turadg Exp $
+name = Quiz Questions Import
+package = Quiz Addon
+description = This module allows you to import questions to quiz node in CSV format.
+dependencies[] = quiz
+dependencies[] = quiz_question
+core = 6.x
+php = 5
+
+; Information added by drupal.org packaging script on 2010-01-29
+version = "6.x-4.0-beta3"
+core = "6.x"
+project = "quiz"
+datestamp = "1264759810"
+

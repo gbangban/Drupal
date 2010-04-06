@@ -1,0 +1,28 @@
+/**
+ * $Id: search.css,v 1.5.2.8 2009/12/27 22:08:10 jwolf Exp $
+ * Flat Future 
+ */
+
+#site-header #search-box {
+    background:url(images/darkblue.png) #4d4d4d 0 -10px repeat-x;
+  border: 1px solid #CCCCCC;
+  float: right;    /* LTR */
+  padding: 0px 5px 8px 8px;
+  position: relative;
+  height:25px;
+  top: 0;
+  -moz-border-radius-bottomleft: 12px;
+  -moz-border-radius-bottomright: 12px;
+  -webkit-border-bottom-left-radius: 10px;
+  -webkit-border-bottom-right-radius: 10px; 
+}
+#site-name {
+    display:inline-block;
+	padding:8px;
+}
+#search-box .form-item label{
+	font-size:66.7%;
+	font-style:normal;
+	font-weight:normal;
+	
+}

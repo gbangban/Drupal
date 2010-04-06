@@ -1,0 +1,15 @@
+; $Id: flashvideo_streaming.info,v 1.1.2.1 2009/02/03 16:58:06 attheshow Exp $
+name = FlashVideo Streaming
+description = Allows FlashVideo streaming from an RTMP server or from a local xmoov-php server.
+dependencies[] = flashvideo
+package = FlashVideo
+version = VERSION
+core = 6.x
+
+
+; Information added by drupal.org packaging script on 2009-12-27
+version = "6.x-1.5"
+core = "6.x"
+project = "flashvideo"
+datestamp = "1261875329"
+

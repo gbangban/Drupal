@@ -1,0 +1,100 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+<title>Creating your very own skin.</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<style type="text/css">
+body {
+  margin: 1em;
+  background-color: #fff;
+}
+div.codeblock
+{
+padding-top: 5px;
+padding-right: 5px;
+padding-bottom: 5px;
+padding-left: 5px;
+border-top-width: 1px;
+border-right-width: 1px;
+border-bottom-width: 1px;
+border-left-width: 1px;
+border-top-style: solid;
+border-right-style: solid;
+border-bottom-style: solid;
+border-left-style: solid;
+border-top-color: #cccccc;
+border-right-color: #cccccc;
+border-bottom-color: #cccccc;
+border-left-color: #cccccc;
+background-color: #eeeeee;
+}
+th {
+  text-align: left;
+  color: #006;
+  border-bottom: 1px solid #ccc;
+}
+tr.odd {
+  background-color: #ddd;
+}
+tr.even {
+  background-color: #fff;
+}
+td {
+  padding: 5px;
+}
+#menu {
+  visibility: hidden;
+}
+#main {
+  margin: 1em;
+}
+</style>
+</head>
+<body>
+<div class="section-1">
+<div class="section-2">
+<div class="section-3">
+<div id="node-140" class="section-4">
+<h1 class="book-heading">Creating your own Dash Player Skin</h1>
+<p>This is probably the coolest feature of the Dash Player... the ability to load an external skin (SWF) to completely change the look and feel of the player.  This allows you to truely have a remarkable looking player while at the same time retain all the solid functionality that the Dash Player has to offer.  So, here is a step-by-step on how you can create your own skin for the Dash Player...</p><br/>
+<div style="height:1px;clear:both;">&nbsp;</div>
+<ul>
+<li>The first thing you will need to do is look inside the <strong>skins</strong> folder of the downloadable Dash Player package.  In here, you sould already see a couple of folders, one being the <strong>default</strong> folder.</li>
+<li>The next step is to copy the <strong>default</strong> folder and then paste that as a new folder name within the <strong>skins</strong> folder.  Make sure you give it the name that you would like to call your skin.</li>
+<li>After you have your very own directory in the <strong>skins</strong> folder, the next step is to open up the <strong>skin.fla</strong> file within that directory using</li>
+<li>This will then bring up the Default Dash Player skin in your Flash CS3 IDE.  From here...go crazy!  Make it look exactly how you want it too.  You just need to make sure you follow these rules when creating your own skin...</li>
+<ul>
+<li>You should NOT change the MovieClip heirarchies.  Basically what this means is that you should not copy a MovieClip within another MovieClip, and then place it at a different heirarchial level in the player.  The Dash Player Core uses MovieClip heirarchy to locate certain elements in your skin, and if you change that, it won't work.</li>
+<li>You should NOT change the MovieClip instance names.  Again, the Dash Player Core uses MovieClip instance names to make associations. However, there are a few "dynamic" instance names that can be used in your skin, where the name does not matter.  But, as a general rule of thumb... don't change the instance names.</li>
+
+</ul>
+<li>Once you are finished making all the changes to you skin, you will then simply run the project so that it creates your <strong>skin.swf</strong> file.</li>
+<li>And now the next step is to make sure that you skin is able to be dynamically resized.</li>
+</ul>
+<h2>Skinning API.</h2>
+As of version 1.1, the Dash Media Player has introduced a Skinning API that lets the skin developers completely customize the behavior of their player.  For more information, go to <a href="http://www.tmtdigital.com/node/302">http://www.tmtdigital.com/node/302</a>, which gives a complete overview of all the API's available for your to use in your custom skin.</br>
+<h2>Allowing your skin to be dynamically resized.</h2>
+
+The Dash Player employs a very unique method for allowing you, the skin designer, to create a skin that dynamically resizes to any size available.  It does this through a proprietary fluid GUI engine that takes uses the Skinning API function called <strong>getLayoutInfo</strong> which tells the dash media player which object properties are resizable and which are not when the player is resized.  This allows you to keep the proportions of your skin elements when it is resized in the player.  So, lets get started by simply opening up the <strong>skin.as</strong> file that should be right next to your SWF file in your skin directory. If you open up this file, you will see a number of different API calls... the one that we are interested in is called <strong>getLayoutInfo</strong>.  In this function you will then see a bunch of XML code that has several different parameters… Each of these parameters are explained below…<br/>
+<table>
+ <thead><tr><th>Element</th><th>Description</th> </tr></thead>
+<tbody>
+
+ <tr class="odd"><td><strong>width</strong></td><td>This is the original with of your skin (before it gets resized)</td> </tr>
+ <tr class="even"><td><strong>height</strong></td><td>This is the original height of your skin (before it gets resized)</td> </tr>
+ <tr class="odd"><td><strong>autohideX</strong></td><td>This is the minimum width that your skin can be before the playlist is hidden automatically.</td> </tr>
+ <tr class="even"><td><strong>autohideY</strong></td><td>This is the minimum height that your skin can be before the information box is hidden automatically.</td> </tr>
+
+ <tr class="odd"><td><strong>spacer</strong></td><td>This is the space between the Playlist and your Main Node.</td> </tr>
+ <tr class="even"><td><strong>linkpadding</strong></td><td>This is the space on either side of the text within a playlist link to be used as padding.</td> </tr>
+ <tr class="odd"><td><strong>resize</strong></td><td>There can be an unlimited number of these tags in your layout.  Basically what this tag indicates is a resizable object property when your skin is resized.  If you wish to have an object in your skin float right with a resize of the player, then you would provide the path to that object and then the “x” property as the value that will move with the size of the player.  If you wish for that object to float right and also float to the bottom during a resize event, then you will need to provide two different resize tags where one provides the “x” property, and the other provides the “y” property of your object.  You can also set the "width" and "height" properties if you wish for the object to resize with the player.</td> </tr>
+</tbody>
+</table>
+
+<br/>
+Now you are done!!  To reference your skin in the player, you can now just use the flashvar <strong>skin={yourskin}</strong> where <strong>{yourskin}</strong> is simply the name of the directory that your skin lives in...  Yes...  It really is that simple!!
+<br/><br/></div>
+</div>
+</div>
+</div>
+</body>
+</html>

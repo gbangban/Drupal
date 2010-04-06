@@ -1,0 +1,251 @@
+<?php
+
+// $Id: flashvideo_streaming.module,v 1.1.2.6 2009/03/07 19:32:48 attheshow Exp $
+
+/**
+ * @file
+ * This plugin allows for FlashVideo video files to be stored on an external streaming (RTMP) server such as Flash Media Server.
+ */
+
+define('FLASHVIDEO_STREAMING_METHOD_RTMP', 0);
+define('FLASHVIDEO_STREAMING_METHOD_XMOOV', 1);
+
+/**
+ * Implementation of hook_form_alter().
+ */
+function flashvideo_streaming_form_alter(&$form, $form_state, $form_id)  {
+  global $conf;
+
+  if ($form_id == 'flashvideo_settings_form') {
+    $node_type = $form['#parameters'][2];
+
+    $form['flashvideo_streaming'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Streaming Server Configuration'),
+      '#collapsible' => TRUE,
+      '#collapsed' => TRUE,
+    );
+    $form['flashvideo_streaming']['flashvideo_'. $node_type .'_streaming_enable'] = array(
+      '#type' => 'checkbox',
+      '#title' => t('Enable FlashVideo Streaming'),
+      '#default_value' => flashvideo_variable_get($node_type, 'streaming_enable', 0),
+      '#description' => t('Enables streaming video support for this content type.'),
+    );
+    $form['flashvideo_streaming']['flashvideo_'. $node_type .'_streaming_method'] = array(
+      '#type' => 'radios',
+      '#title' => t('Streaming Method'),
+      '#default_value' => flashvideo_variable_get($node_type, 'streaming_method', 0),
+      '#options' => array(
+        FLASHVIDEO_STREAMING_METHOD_RTMP => t('RTMP'),
+        FLASHVIDEO_STREAMING_METHOD_XMOOV => t('xmoov-php'),
+      ),
+      '#description' => t('Choose the method that this content type will use to stream video content.<br />Read more about <a href="http://en.wikipedia.org/wiki/Real_Time_Messaging_Protocol">RTMP streaming</a>, <a href="http://www.longtailvideo.com/support/jw-player-setup-wizard?example=4">RTMP Using the JW Player</a>, and <a href="http://xmoov.com/xmoov-php/">xmoov-php</a>.'),
+    );
+    $form['flashvideo_streaming']['flashvideo_'. $node_type .'_streamer'] = array(
+      '#title' => t('Streaming URL'),
+      '#type' => 'textfield',
+      '#default_value' => flashvideo_variable_get($node_type, 'streamer', ''),
+      '#maxlength' => 128,
+      '#description' => t('The rtmp:// URL that your uploaded videos can be streamed from.<br />Example: <strong>rtmp://example.com</strong>'),
+      '#required' => $form_state['values']['flashvideo_streaming']['flashvideo_'. $node_type .'_streaming_enable'] && $form_state['values']['flashvideo_streaming']['flashvideo_'. $node_type .'_streaming_method'] == FLASHVIDEO_STREAMING_METHOD_RTMP ? TRUE : FALSE,
+    );
+    $form['flashvideo_streaming']['flashvideo_RTMP'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('RTMP Server Configuration'),
+      '#collapsible' => TRUE,
+      '#collapsed' => TRUE,
+    );
+    $form['flashvideo_streaming']['flashvideo_RTMP']['flashvideo_'. $node_type .'_streaming_ssh_username'] = array(
+      '#type' => 'textfield',
+      '#title' => t('SSH Username'),
+      '#maxlength' => 25,
+      '#default_value' => flashvideo_variable_get($node_type, 'streaming_ssh_username', ''),
+      '#description' => t('The FlashVideo Streaming module uses the SCP and SSH commands to move files to your RTMP streaming server.  You must have an SSH account that is allowed to move files via OpenSSH Public / Private Keys (See README.txt for help with this). When your account is set up and functioning correctly, enter the username here.'),
+      '#required' => $form_state['values']['flashvideo_streaming']['flashvideo_'. $node_type .'_streaming_enable'] && $form_state['values']['flashvideo_streaming']['flashvideo_'. $node_type .'_streaming_method'] == FLASHVIDEO_STREAMING_METHOD_RTMP ? TRUE : FALSE,
+    );
+    $form['flashvideo_streaming']['flashvideo_RTMP']['flashvideo_'. $node_type .'_streaming_ssh_server'] = array(
+      '#type' => 'textfield',
+      '#title' => t('Streaming Server Address'),
+      '#maxlength' => 55,
+      '#default_value' => flashvideo_variable_get($node_type, 'streaming_ssh_server', ''),
+      '#description' => t('What is the address for the RTMP streaming server? You should <strong>NOT</strong> need to enter http: here.<br />Example: example.com'),
+      '#required' => $form_state['values']['flashvideo_streaming']['flashvideo_'. $node_type .'_streaming_enable'] && $form_state['values']['flashvideo_streaming']['flashvideo_'. $node_type .'_streaming_method'] == FLASHVIDEO_STREAMING_METHOD_RTMP ? TRUE : FALSE,
+    );
+    $form['flashvideo_streaming']['flashvideo_RTMP']['flashvideo_'. $node_type .'_streaming_ssh_path'] = array(
+      '#type' => 'textfield',
+      '#title' => t('Streaming Server File Path'),
+      '#default_value' => flashvideo_variable_get($node_type, 'streaming_ssh_path', ''),
+      '#description' => t('Which directory on the RTMP streaming server should files be copied into?<br />Example: d:/data/media/apps/Drupal/streams/video'),
+      '#required' => $form_state['values']['flashvideo_streaming']['flashvideo_'. $node_type .'_streaming_enable'] && $form_state['values']['flashvideo_streaming']['flashvideo_'. $node_type .'_streaming_method'] == FLASHVIDEO_STREAMING_METHOD_RTMP ? TRUE : FALSE,
+    );
+    $form['flashvideo_streaming']['flashvideo_RTMP']['flashvideo_'. $node_type .'_streaming_delete'] = array(
+      '#type' => 'checkbox',
+      '#title' => t('Delete Local files after move.'),
+      '#default_value' => flashvideo_variable_get($node_type, 'streaming_delete', ''),
+      '#description' => t('Checking this check box will delete the Flash video file from the local file system after it has successfully moved to the RTMP streaming server.'),
+    );
+    $form['flashvideo_streaming']['flashvideo_xmoov'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('xmoov-php Server Configuration'),
+      '#collapsible' => TRUE,
+      '#collapsed' => TRUE,
+    );
+    $form['flashvideo_streaming']['flashvideo_xmoov']['flashvideo_'. $node_type .'_xmoov_path'] = array(
+       '#title' => t('File Path to xmoov-php Script'),
+       '#type' => 'textfield',
+       '#default_value' => flashvideo_variable_get($node_type, 'xmoov_path', ''),
+       '#maxlength' => 128,
+       '#description' => t('The path to your xmoov-php.php script.') .'<br />'. t('Example') .': <strong>sites/all/modules/flashvideo/xmoov.php</strong>. '. t('Note, the files directory is not allowed to execute PHP-files.'),
+       '#required' => $form_state['values']['flashvideo_streaming']['flashvideo_'. $node_type .'_streaming_enable'] && $form_state['values']['flashvideo_streaming']['flashvideo_'. $node_type .'_streaming_method'] == FLASHVIDEO_STREAMING_METHOD_XMOOV ? TRUE : FALSE,
+    );
+    $form['#validate'][] = '_flashvideo_streaming_admin_validate';
+  }
+}
+
+function _flashvideo_streaming_admin_validate($form, &$form_state) {
+  $node_type = $form['#parameters'][2];
+
+  if ($form_state['values']['flashvideo_'. $node_type .'_streaming_enable'] && $form_state['values']['flashvideo_'. $node_type .'_streaming_method'] == FLASHVIDEO_STREAMING_METHOD_XMOOV) {
+
+    // If we are using xmoov-php, check the xmoov path to make sure it exists.
+    $user_path = $form_state['values']['flashvideo_'. $node_type .'_xmoov_path'];
+    if (!file_exists(getcwd() ."/". $user_path)) {
+      form_set_error('flashvideo_'. $node_type .'_xmoov_path', "Can not find xmoov-php at ". getcwd() ."/". $user_path);
+    }
+    $form_state['values']['flashvideo_'. $node_type .'_xmoov_path'] = $user_path;
+    $form_state['values']['flashvideo_'. $node_type .'_streamer'] = base_path() . $user_path;
+  }
+}
+
+/**
+ * Implementation of hook_flashvideo_delete_file().
+ *
+ * param $file = Standard Drupal file object.
+ * param $node_type = Standard Drupal node type string.
+ *
+ * Returns TRUE if the file is successfully deleted.
+ */
+function flashvideo_streaming_flashvideo_delete_file($file, $node_type) {
+
+  if (!flashvideo_variable_get($node_type, 'streaming_enable', 0) || flashvideo_variable_get($node_type, 'streaming_method', 0) != FLASHVIDEO_STREAMING_METHOD_RTMP || !flashvideo_variable_get($node_type, 'streaming_ssh_username', 0) || !flashvideo_variable_get($node_type, 'streaming_ssh_server', 0) || !flashvideo_variable_get($node_type, 'streaming_ssh_path', 0) || !flashvideo_variable_get($node_type, 'streaming_delete', 0)) {
+    return array(); // User doesn't want to do deletions.
+  }
+
+  // Get the filename for the file on the streaming server.
+  $filename = basename($file->filepath);
+
+  // Get server connection details
+  $ssh_username = variable_get('flashvideo_streaming_ssh_username', 0);
+  $ssh_server = variable_get('flashvideo_streaming_ssh_server', 0);
+  $ssh_path = variable_get('flashvideo_streaming_ssh_path', 0);
+
+  // Delete the file from streaming server
+  if (strstr($filename, '.flv')) { // Only do this for flv files.
+    shell_exec('ssh '. $ssh_username .'@'. $ssh_server .' \'rm -rf '. $ssh_path .'/'. $filename .'\'');
+    // Delete the file from the Amazon S3 database table.
+    db_query("DELETE FROM {flashvideo_streaming} WHERE fid = %d", $file->fid);
+    drupal_set_message($file->filename .' has been deleted from the streaming server');
+    return TRUE;
+  }
+  else {
+    return array();
+  }
+  return array();
+}
+
+/**
+ * Implementation of hook_flashvideo_get_file().
+ *
+ * param $file = Standard Drupal file object.
+ * param $node_type = Standard Drupal node type string.
+ *
+ * Returns an alternate filepath, pointing to the file on the streaming server.
+ */
+function flashvideo_streaming_flashvideo_get_file($file, $node_type) {
+
+  // Get the filename for the file on the streaming server.
+  $filename = basename($file->filepath);
+
+  // RTMP process:
+  if (flashvideo_variable_get($node_type, 'streaming_enable', 0) && flashvideo_variable_get($node_type, 'streaming_method', 0) == FLASHVIDEO_STREAMING_METHOD_RTMP) {
+    if (!flashvideo_variable_get($node_type, 'streaming_ssh_username', 0) || !flashvideo_variable_get($node_type, 'streaming_ssh_server', 0) || !flashvideo_variable_get($node_type, 'streaming_ssh_path', 0)) {
+      return array(); // User doesn't want to do streaming "gets".
+    }
+
+    // If they wish to delete the local files, then we need to do this here...
+    if (variable_get('flashvideo_streaming_delete', 0) && file_exists(getcwd() .'/'. $file->filepath)) {
+      // See if we've already moved it to the streaming server.
+      $count = db_result(db_query("SELECT COUNT(*) FROM {flashvideo_streaming} WHERE fid=%d", $file->fid));
+      if ($count > 0) {
+        // We've got a record that the file moved. Delete the local file.
+        file_delete($file->filepath);
+      }
+    }
+    // FLV paths are now on the streaming server. Other files still need to use the default filepath stored in DB.
+    if (strstr($filename, '.flv')) {
+      $filepath['file'] = $filename;
+    }
+    return $filepath; // Finished RTMP filepath
+  }
+  // xmoov-php process:
+  elseif (flashvideo_variable_get($node_type, 'streaming_enable', 0) && flashvideo_variable_get($node_type, 'streaming_method', 0) == FLASHVIDEO_STREAMING_METHOD_XMOOV) {
+    if (!flashvideo_variable_get($node_type,  'xmoov_path', 0)) {
+      return array(); // User doesn't want to do streaming "gets".
+    }
+
+    // FLV paths are passed to xmoov-php as a local path relative to the doc root
+    // Other files still need to use the default filepath stored in DB.
+    if (strstr($filename, '.flv')) {
+
+      // To do: We need to use the full filepath so that we do not force the
+      // user to set this in xmoov-php itself. Currently, the filepath must
+      // be set in xmoov-php.php
+
+      $filepath['file'] = $filename; // Finished xmoov-php filepath
+    }
+    return $filepath;
+  }
+  else {
+    return array(); // User doesn't want to do streaming "gets".
+  }
+}
+
+/**
+ * Implementation of hook_flashvideo_save_file().
+ *
+ * param $file = Standard Drupal file object.
+ * param $node_type = Standard Drupal node type string.
+ *
+ * Returns TRUE if the file is successfully saved to the streaming server.
+ */
+function flashvideo_streaming_flashvideo_save_file($file, $node_type) {
+  global $conf;
+
+  if (!flashvideo_variable_get($node_type, 'streaming_enable', 0) || flashvideo_variable_get($node_type, 'streaming_method', 0) != FLASHVIDEO_STREAMING_METHOD_RTMP || !flashvideo_variable_get($node_type, 'streaming_ssh_username', 0) || !flashvideo_variable_get($node_type, 'streaming_ssh_server', 0) || !flashvideo_variable_get($node_type, 'streaming_ssh_path', 0)) {
+    return array(); // User doesn't want to do streaming saves.
+  }
+
+  // Get server connection details
+  $ssh_username = flashvideo_variable_get($node_type, 'streaming_ssh_username', 0);
+  $ssh_server = flashvideo_variable_get($node_type, 'streaming_ssh_server', 0);
+  $ssh_path = flashvideo_variable_get($node_type, 'streaming_ssh_path', 0);
+
+  // Now move the file to the streaming server.
+  $file_to_copy = getcwd() .'/'. $file->filepath;
+  if (strstr($file_to_copy, '.flv')) { // Only do this for flv files.
+    $scp_command = 'scp -v '. $file_to_copy .' '. $ssh_username .'@'. $ssh_server .':'. $ssh_path .' 2>&1';
+    $scp_result = shell_exec($scp_command);
+    if (strstr($scp_result, 'error')) { // Failure to move
+      drupal_set_message($file->filename .' could not be moved to the streaming server.<br /><strong>Command Attempted:</strong> '. $scp_command .'<br /><strong>Error message:</strong> <pre>'. $scp_result .'</pre>', 'error');
+      return array();
+    }
+    else { // Success
+      db_query("INSERT INTO {flashvideo_streaming} (fid) VALUES (%d)", $file->fid);
+      drupal_set_message($file->filename .' has been added to the streaming server.');
+      return TRUE;
+    }
+  }
+  else {
+    return array();
+  }
+}

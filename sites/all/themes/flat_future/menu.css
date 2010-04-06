@@ -1,0 +1,93 @@
+/* $Id: menu.css Exp $ */
+
+div #header-inner{
+	font-family:myriad pro, Arial, Helvetica, sans-serif;
+    font-size: 30px;
+    font-weight: normal;
+    text-transform: normal;
+    letter-spacing: normal;
+}
+div #site-menu{
+    text-align:right;
+}
+
+h1, h2{
+}
+div#block-menu-primary-links{
+	margin:10px 0;
+}
+#block-menu-primary-links ul.menu li{
+	margin:0 5px;
+	padding:0;
+	position:relative;
+	height:20px;
+    width:140px;
+	float:left;
+}
+
+#block-menu-primary-links ul.menu a {
+	color:#000;
+	display:inline-block;
+	text-decoration:none;
+	padding:0;
+	width:140px;
+	text-align:center;
+	opacity:.9;
+}
+
+#block-menu-primary-links ul.menu a:hover, #block-menu-primary-links ul.menu a:focus, #block-menu-primary-links ul.menu a.active{
+	color:#FFF;
+	opacity:1;
+	background:url(images/green.png) 0 -10px;
+	box-shadow: 3px 3px 3px #666;
+    -webkit-box-shadow: 3px 3px 3px #666;
+    -moz-box-shadow: 3px 3px 3px #666;
+	border-radius:25px;
+    -webkit-border-radius: 25px;
+    -moz-border-radius: 25px;  
+    margin:0;
+}
+#block-menu-primary-links ul.menu a.active{
+	color:#000 !important;
+}
+
+li.leaf{
+	list-style:none;
+}
+/*
+div .secondary-menu{
+    
+    font-family: Helvetica, Arial, sans-serif;
+    font-weight: normal;
+    text-transform: normal;
+    letter-spacing: normal;
+    line-height: .667em;
+    text-align:right;
+	padding:0;
+}
+
+
+div .secondary-menu ul.links{
+    padding:0;
+    
+}
+div .secondary-menu a {
+    color:#777;
+    display:inline-block;
+    text-decoration:none;
+    padding-left:15px;
+	font-size: .75em;
+	text-align:center;
+	border-left:1px solid #000;
+	font-family:myriad pro, Arial, Helvetica, sans-serif;
+}
+div .secondary-menu .first a {
+    border:none;
+}
+
+div .secondary-menu a:hover{
+	color:#8dc440;
+}
+div .secondary-menu a:focus, div .secondary-menu a.active{
+    color:#8dc440;
+}*/

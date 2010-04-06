@@ -1,0 +1,36 @@
+<?php
+// $Id: flashvideo_streaming.install,v 1.1.2.2 2009/03/10 03:17:51 attheshow Exp $
+
+/**
+ * @file
+ * Adds a table that records when files have been moved to the streaming server.
+ */
+
+/**
+ * Implementation of hook_install().
+ */
+function flashvideo_streaming_install() {
+  // Create tables.
+  drupal_install_schema('flashvideo_streaming');
+}
+
+function flashvideo_streaming_schema() {
+  $schema['flashvideo_streaming'] = array(
+    'fields' => array(
+      'fid'  => array('type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE, 'default' => 0)
+    ),
+    'indexes' => array(
+      'fid' => array('fid')
+    ),
+    'primary key' => array('fid'),
+  );
+  return $schema;
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function flashvideo_streaming_uninstall() {
+  drupal_uninstall_schema('flashvideo_streaming');
+  db_query("DELETE FROM {variable} WHERE name LIKE 'flashvideo_%stream%'");
+}

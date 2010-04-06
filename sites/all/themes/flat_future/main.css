@@ -1,0 +1,107 @@
+/* $Id: main.css Exp $ */
+/*
+	bg color: #d8f8fd
+	light grey Color: #6e6e6e
+	dark grey color: #4d4d4d
+	
+*/
+* :focus { outline: 0; }
+body{
+     font-family: myriad pro, Arial, sans-serif;
+	font-size: 100%;
+	font-style: normal;
+	font-weight: normal;
+	text-transform: normal;
+	letter-spacing: normal;
+	line-height: 1.4em;
+	color:#000;
+}
+#page{
+	background:url("images/bg.png") repeat-x scroll 0 -70px #d8f8fd;
+	border-right:1px #000 solid;
+    border-left:1px #000 solid;
+}
+#page-bottom{
+    background:url("images/bg-bottom.png") no-repeat scroll 0 0;
+	height:205px;
+}
+h1{
+	font-size:1.25em;
+	padding:0 0 0 10px;
+	text-align:left;
+}
+h1#site-name{
+	line-height:45px;
+}
+h2.pane-title{
+    border-bottom:2px solid white;
+}
+.node-type-page div.content p{
+}
+.hidden{
+	display:none;
+}
+#site-slogan{
+}
+#site-name a:link, #site-name a:visited  {
+	color:#000;
+	text-decoration:none;
+	font-weight:normal;
+}
+#content{
+	padding:10px;
+} 
+.content, div.field-content{
+	padding:0 15px;
+}
+#main{
+	min-height:500px;
+}
+#site-header, #site-subheader, #footer-region, .column, .node, .comment, .block {
+    margin:0;
+    padding:0;
+}
+#footer-inner{
+	background:url(images/darkblue.png) repeat-x;
+	min-height:150px;
+    position:absolute;
+    width:960px;
+	border-right:1px #000 solid;
+    border-left:1px #000 solid;
+}
+#footer{
+	left:-1px;
+}
+h1, h2 {
+    padding:5px 10px;
+}
+a{
+	text-decoration:none;
+    font-weight:normal;
+}
+a:link{
+	color:#999;
+}
+a:active{
+	color:#eee;
+}
+#site-name a:hover{
+    color:#000 !important; 
+}
+a:hover{
+	color:#0bb !important; 
+}
+a:focus, a:visited{
+	color:#fff;
+}
+.menu a:hover {
+	margin-left:2px;
+}
+#site-name a:hover{
+	color:#fff;
+}
+/* Gallery Styling*/
+
+div.view-gallery-views table.views-view-grid{
+    margin:0 auto;
+}

@@ -1,0 +1,15 @@
+; $Id: flashvideo_views.info,v 1.3.2.6 2009/01/31 05:04:07 attheshow Exp $
+name = FlashVideo Views
+description = Provides a plugin to allow Views functionality to the FlashVideo Module
+dependencies[] = views
+dependencies[] = flashvideo
+package = FlashVideo
+core = 6.x
+
+
+; Information added by drupal.org packaging script on 2009-12-27
+version = "6.x-1.5"
+core = "6.x"
+project = "flashvideo"
+datestamp = "1261875329"
+

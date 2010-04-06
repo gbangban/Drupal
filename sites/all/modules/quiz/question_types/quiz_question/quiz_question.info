@@ -1,0 +1,16 @@
+; $Id: quiz_question.info,v 1.2.2.1 2009/07/08 19:56:28 sivaji Exp $
+
+name = Quiz Question
+package = Quiz Core
+description = Provides support for base-level question types.
+core = 6.x
+php = 5.2
+dependencies[] = autoload
+dependencies[] = quiz
+
+; Information added by drupal.org packaging script on 2010-01-29
+version = "6.x-4.0-beta3"
+core = "6.x"
+project = "quiz"
+datestamp = "1264759810"
+

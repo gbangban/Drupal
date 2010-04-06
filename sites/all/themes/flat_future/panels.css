@@ -1,0 +1,50 @@
+/* $Id: panels.css Exp $ */
+/*
+    font color: #fff
+    light grey Color: #858585
+    dark grey color: #4d4d4d
+    
+*/
+
+div .lightblue{
+	background:url(images/lightblue.png) #d8f8fd bottom repeat-x;
+	border:blue 1px solid;
+	min-height:250px;
+	padding:10px;
+}
+
+div .darkblue{
+    background:url(images/darkblue.png) #d8f8fd bottom repeat-x;
+    min-height:250px;
+	border:blue 1px solid;
+    padding:10px;
+}
+
+div .green{
+    background:url(images/green.png) #f3fc7f bottom repeat-x;
+    min-height:250px;
+	border:green 1px solid;
+	padding:10px;
+}
+
+.lightblue, .darkblue, .green, #search-box{
+	box-shadow: 3px 3px 3px #666;
+	-webkit-box-shadow: 3px 3px 3px #666;
+	-moz-box-shadow: 3px 3px 3px #666;
+}
+/*
+.lightblue:hover, .darkblue:hover, .green:hover{
+    opacity:1;
+}*/
+.panel-pane  tr.odd, .panel-pane tr.even{
+	background:transparent;
+}
+.round { 
+        border-radius:25px;
+        -webkit-border-radius: 25px;
+        -moz-border-radius: 25px;     
+    }
+.full{
+    width:960px !important; 
+}
+

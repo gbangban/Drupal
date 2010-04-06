@@ -1,0 +1,56 @@
+<?php
+// $Id: flashvideo.install,v 1.1.2.3 2007/11/15 05:40:51 travist Exp $
+
+/**
+ * @file
+ * This file handles installation and uninstallation of FlashVideo s3 plugin DB tables.
+ */
+
+/**
+ * Implementation of hook_install().
+ */
+function flashvideo_s3_install() {
+
+  // Create tables.
+  drupal_install_schema('flashvideo_s3');  
+}
+
+function flashvideo_s3_schema() {
+  $schema['flashvideo_s3'] = array(
+    'fields' => array(
+      'fid'   => array('type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE, 'default' => 0),
+      'bucket' => array('type' => 'text', 'not null' => FALSE),
+      'did' => array('type' => 'text', 'not null' => FALSE),
+      'domain' => array('type' => 'text', 'not null' => FALSE),
+      'status' => array('type' => 'text', 'not null' => FALSE),
+      'operation' => array('type' => 'text', 'not null' => FALSE)
+    ),
+    'indexes' => array(
+      'fid' => array('fid')
+    ),
+    'primary key' => array('fid'),
+  );
+  return $schema;
+}
+
+function flashvideo_s3_update_6001()
+{
+  $ret = array();
+  
+  // S3 doesn't like the underscores..
+  $default_bucket = variable_get('flashvideo_s3_bucket', str_replace(' ', '_', $conf['site_name']));
+  variable_set( 'flashvideo_s3_bucket', str_replace('_', '-', $default_bucket) );
+  
+  db_add_field($ret, 'flashvideo_s3', 'did', array('type' => 'text', 'not null' => FALSE) );
+  db_add_field($ret, 'flashvideo_s3', 'domain', array('type' => 'text', 'not null' => FALSE) ); 
+  db_add_field($ret, 'flashvideo_s3', 'status', array('type' => 'text', 'not null' => FALSE) );
+  db_add_field($ret, 'flashvideo_s3', 'operation', array('type' => 'text', 'not null' => FALSE) );  
+  return $ret;	
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function flashvideo_s3_uninstall() {
+  drupal_uninstall_schema('flashvideo_s3');
+}

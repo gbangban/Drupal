@@ -1,0 +1,34 @@
+<?php
+// $Id: nodewords_tokens.install,v 1.1.2.1 2010/03/21 13:11:24 kiam Exp $
+
+/**
+ * @file
+ * Install, update and uninstall functions for the Tokens for meta tags module.
+ */
+
+/**
+ * Implements hook_install().
+ */
+function nodewords_tokens_install() {
+  $node_types = array_keys(node_get_types('names'));
+  $variables = array(
+    'nodewords_filter_modules_output_',
+    'nodewords_filter_regexp_',
+    'nodewords_use_alt_attribute_',
+  );
+
+  foreach ($node_types as $node_type) {
+    foreach ($variables as $variable) {
+      variable_del($variable . $node_type);
+    }
+  }
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function nodewords_tokens_uninstall() {
+  variable_del('nodewords_filter_modules_output');
+  variable_del('nodewords_filter_regexp');
+  variable_del('nodewords_use_alt_attribute');
+}

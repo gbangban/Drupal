@@ -1,0 +1,2543 @@
+<?php
+// $Id: flashvideo.module,v 1.73.2.114 2009/10/21 01:05:11 travist Exp $
+/**
+ * @file
+ * Enables the ability to attach a Flash video to a node.
+ */
+
+/**
+ * The Status defines for a FlashVideo video.
+ */
+
+define('FLASHVIDEO_STATUS_OK', 0);
+define('FLASHVIDEO_STATUS_CONVERTING', 1);
+define('FLASHVIDEO_STATUS_PENDING', 2); // Not used anymore.
+define('FLASHVIDEO_STATUS_CONVERTED', 3);
+
+// A string of default flash mime types.  Each one separated by a new line character "\n".
+define('FLASHVIDEO_MIMETYPE_STRING', "flv-application/octet-stream\napplication/octet-stream\napplication/x-flash-video\nvideo/x-flv\nvideo/mp4");
+
+// A string representation of the [FileType, MimeType, Player] combination.
+$flashvideo_filetype_string = "[avi, video/avi, 0]\n[mpeg, video/quicktime, 0]\n[mpg, video/quicktime, 0]\n[mov, video/quicktime, 0]\n[rm, application/vnd.rn-realmedia, 0]\n[m4v, video/quicktime, 0]\n";
+$flashvideo_filetype_string .= "[flv, flv-application/octet-stream, flash]\n[playlist, 0, flash]\n[wmv, video/x-ms-wmv, 0]\n[3gp, video/3gpp, 0]\n[mp4, video/mp4, flash]\n[dir, application/x-director, 0]\n";
+$flashvideo_filetype_string .= "[dcr, application/x-director, 0]\n[ogg, application/ogg, 0]\n[youtube, 0, youtube]\n[googlevideo, 0, googlevideo]\n[brightcove, 0, brightcove]\n[vimeo, 0, vimeo]";
+
+define('FLASHVIDEO_FILETYPE_STRING', $flashvideo_filetype_string);
+
+/**
+ * The flags that can be overidden within the hooks to allow for specific functionality.
+ */
+
+define('FLASHVIDEO_REGEN_THUMB', 0x1);  // Bit field letting the flashvideo module know to regenerate the thumbnail.
+define('FLASHVIDEO_REGEN_VIDEO', 0x2);  // Bit field letting the flashvideo module know to regenerate the video.
+
+// Quick Function for formating our array elements.
+function fid_format(&$item) {$item = 'f.fid='. $item;}
+
+// Quick Function that returns the file extension given a file path.
+function get_file_ext($filepath) { return drupal_strtolower(drupal_substr($filepath, strrpos($filepath, '.') + 1)); }
+
+// Quick Function that returns the base file name given a file path.
+function filename($filepath) { return basename($filepath, "." . get_file_ext($filepath)); }
+
+/**
+ * Wrapper function around the variable_get function to allow for global variables.
+ *
+ *  @param  $node_type
+ *   The node type.
+ *
+ *  @param  $name
+ *   The name of the variable without the "flashvideo_{$node_type}_"
+ *
+ *  @param  $default
+ *   The default for this variable.
+ *
+ *  @return
+ *   A value for this variable.
+ */
+function flashvideo_variable_get($node_type, $name, $default) {
+  global $conf;
+  if ($node_type == NULL) {
+    return variable_get($name, $default);
+  }
+  elseif (isset($conf['flashvideo_'. $node_type .'_'. $name])) {
+    return $conf['flashvideo_'. $node_type .'_'. $name];
+  }
+  elseif (isset($conf['flashvideo_global_'. $name])) {
+    return $conf['flashvideo_global_'. $name];
+  }
+  elseif (isset($conf['flashvideo_'. $name])) {
+    return $conf['flashvideo_'. $name];
+  }
+  else {
+    return $default;
+  }
+}
+
+/**
+ * Implementation of hook_help().
+ */
+function flashvideo_help($path = 'admin/help#flashvideo', $arg) {
+  switch ($path) {
+    case 'admin/help#flashvideo':
+      $output = '<p>'. t('The FlashVideo module expands Drupal\'s file upload capabilities by allowing users to upload videos and attach those videos to any node.  Even more exciting, is that FlashVideo automatically converts your videos to the very common Flash format and creates a thumbnail image of any newly uploaded video during every cron cycle.  Once the video is in the Flash format, the video can then be embedded in that node using the very simple <b>[video]</b> tag.') .'</p>';
+      $output .= '<p>'. t('To enable this module for a certain content type, you must first go to the !settingslink and select the FlashVideo settings for any available content type in the Drupal system.  Once the FlashVideo module has been enabled for that content type, you will then notice the modified upload form when you add new content for that content type.', array('!settingslink' => l(t('FlashVideo Settings'), 'admin/settings/flashvideo'))) .'</p>';
+      $output .= '<p>'. t('Once a video has been uploaded, it will then have to wait for the next cron cycle for the conversion to Flash format to begin.  You can manually run the cron operation by going to <b>Administer->Reports->Status report</b> and then click on the link that says <b>run cron manually</b>.') .'</p>';
+      $output .= '<ul>'. t('<li><a href="#install">Installation and Configuration</a></li><li><a href="#displaying1">Displaying Videos Using Tags</a></li><li><a href="#displaying2">Automating the Display of Videos Using Your Theme</a></li><li><a href="#trouble">Troubleshooting</a></li><li><a href="#importing">Importing Videos</a></li><li><a href="#api">Using the Flashvideo API</a></li><li><a href="#admin">FlashVideo Administration Pages</a></li>') .'</ul>';
+      $output .= '<a name="install"></a><h3>'. t('Installation and Configuration') .'</h3>';
+      $output .= '<p>Follow these steps to get the FlashVideo module installed and configured:</p>';
+      $output .= '<ol><li>Download the FlashVideo module and enable it. You\'ve already done this.</li><li>Get <a href="http://en.wikipedia.org/wiki/Ffmpeg">FFMPEG</a> installed on your server.<br />Note: Some hosts may already have the FFMPEG binary installed for you to use.<br />Why? - FFMPEG is a powerful utility that handles the video conversion processes for FlashVideo.</li><li>Configure either your <strong>php.ini</strong> or your primary Drupal <strong>.htaccess</strong> file for FlashVideo. Use the formats below:
+<ul><li><b>Recommended Settings for php.ini:</b><br/>
+<ul>
+<li><em>post_max_size=100M</em></li>
+<li><em>upload_max_filesize=100M</em></li>
+<li><em>max_execution_time=1000</em></li>
+<li><em>max_input_time=1000</em></li>
+</ul>
+</li>
+<li><b>Recommended Settings for .htaccess file:</b><br/>
+<ul>
+<li><em>php_value&nbsp;&nbsp;post_max_size&nbsp;&nbsp;100M</em></li>
+<li><em>php_value&nbsp;&nbsp;upload_max_filesize&nbsp;&nbsp;100M</em></li>
+<li><em>php_value&nbsp;&nbsp;max_execution_time&nbsp;&nbsp;1000</em></li>
+<li><em>php_value&nbsp;&nbsp;max_input_time&nbsp;&nbsp;1000</em></li>
+</ul>
+</li>
+</ul><br />Why? - Increasing these settings allows users to upload larger video files that may take longer to upload.</li>
+<li>Download a Flash player such as the <a href="http://www.longtailvideo.com/players/jw-flv-player/">JW Player</a> or the <a href="http://www.tmtdigital.com/project/dash_player">Dash Player</a>. You only need the primary player.swf file. Change the name to <strong>Player.swf</strong> and put it in your site\'s <strong>files</strong> directory.<br />Why? - This will be the interface that website visitors use to watch your converted video files.</li>
+<li>Configure cron to run on your server.  If you are not familiar with cron, we recommend using the <a href="http://drupal.org/project/poormanscron">Poormanscron</a> module.<br />Why? - FlashVideo converts videos during cron runs. If cron doesn\'t run, your videos will never be converted.</li>
+<li>(Optional) This module, by default, uses the Upload module. If you prefer to use the more flexible <a href="http://drupal.org/project/filefield">CCK FileField module</a>, you should enable that module on your system and then visit the <a href="/admin/settings/flashvideo/universal">Universal Settings</a> and tell FlashVideo to utilize FileField for video uploads.<br />Why? - Some users prefer to use CCK FileField, which is a highly-configurable alternative to the core Drupal Upload module.</li>
+<li>Go to the <a href="/admin/settings/flashvideo">FlashVideo Settings</a> pages and follow the instructions to enable FlashVideo for at least one of your content types.<br />Why? - Chances are that you do not want to attach videos to all of your content types, so you must tell FlashVideo when to take action on uploaded files.</li>
+<li>Create a new piece of content and display your video using one of the two methods outlined below.</li>
+</ol>';
+      $output .= '<a name="displaying1"></a><h3>'. t('Displaying Videos Using Tags') .'</h3>';
+      $output .= '<p>'. t('After the video has been converted, it will then be available to any node referencing that video.  That node can then reference the video by using the <b>[video]</b> tag, and also reference the video thumbnail by providing the <b>[thumbnail]</b> tag.') .'</p>';
+      $output .= '<p>'. t('Parameters for these tags are provided by using a "<b>:</b>" to indicate a new parameter is being provided.  The following format should be used for both the <b>[video]</b> and <b>[thumbnail]</b> tags.  <b>[video: param=value]</b> where <b>param</b> is the name of the parameter being passed, and <b>value</b> is the value of the parameter.') .'</p>';
+      $output .= '<p>'. t('The following parameters can be used:') .'</p>';
+      $output .= t('<ul>
+                <li><b>index</b> - This is used to reference a video when multiple videos have been provided for each node.  If no <b>node</b> parameter is specified, then this will reference the node in which the tag resides.  Example: <em>[video: index=0]</em> would reference the first video uploaded to that node, while <em>[video: index=1]</em> would reference the second video uploaded to that node.</li>
+                <li><b>node</b> - This is used to reference a video in another node.  Example: <em>[video: node=10: index=0]</em> would reference the first video uploaded to node 10.</li>
+                <li><b>fids</b> - File ID\'s:  This parameter can specify a single File ID, or many File ID\'s separated by a "-".  If many File ID\'s are specified then those videos will play in that order.  If you would like to show all your videos uploaded to a node in a playlist fashion, all you have to specify is <strong>fids=node</strong>. Example: <em>[video: fids=6]</em> would play the video for file ID 6, while <em>[video: fids:5-3-34]</em> would play files 5 followed by 3 followed by 34.</li>
+                <li><b>file</b> - Used to specify a certain file by it\'s file name.  Referenced from the system files directory.</li>
+                <li><b>id</b> (For <em>video</em> tags only) - The <b>id</b> tags are used to play YouTube, Google, and Brightcove videos.  For YouTube video\'s simply just place the ID after the tag.  For Google and Brightcove Videos, you will need to place <b>google-</b> and <b>brightcove-</b> respectively at the beginning of the tag.  Example:  <em>[video:id=google-3754293779500828561]</em> will play video 3754293779500828561 from video.google.com, and <em>[video:id=SmVAWKfJ4Go]</em> will play a video from YouTube with the ID SmVAWKfJ4Go.</li>
+                <li><b>width</b> (For <em>video</em> tags only) - This parameter will override the default width of the video with the value given from this parameter.</li>
+                <li><b>height</b> (For <em>video</em> tags only) - This parameter will override the default height of the video with the value given from this parameter.</li>
+                <li><b>autostart</b> (For <em>video</em> tags only) - This parameter indicates if the video should start automatically. Accepted values are <em>true</em> or <em>false</em>.</li>
+                <li><b>flashvar</b> (For <em>video</em> tags only) - This parameter is used to specify custom FlashVars within the object code of the player.  This can be used to override default functionality of any video player.  The following schema should be used to denote any FlashVars for your video: <strong>[video: flashvar|param=value]</strong> where "flashvar" indicates that the parameter is a FlashVar followed by a "|" and then your FlashVar parameter and value.  For example, if I want to set my intro image for my video as "intro.jpg", my [video] tag would look like the following: <strong>[video: flashvar|image=intro.jpg]</strong></li>
+              </ul>');
+      $output .= '<p>'. t('The following are examples of using the [video] and [thumbnail] tag system:') .'</p>';
+      $output .= t('<ul>
+                <li><b>[video]</b> - The first video uploaded to this node, with all parameters using their defaults.</li>
+                <li><b>[video: index=2: width=320: height=240]</b> - The third video uploaded to this node with dimensions of 320x240</li>
+                <li><b>[thumbnail: index=1]</b> - The thumbnail for the second video uploaded to this node.</li>
+                <li><b>[video: autostart=false]</b> - The first video uploaded to this node, which will not start automatically.</li>
+              </ul>');
+      $output .= '<a name="displaying2"></a><h3>'. t('Automating the Display of Videos Using Your Theme') .'</h3>';
+      $output .= '<p>Use the following instructions if you wish to configure your system so that users do not have to use tags within the body of their posts:</p><ol><li>Go to the FlashVideo settings for your video content type and check the box next to " Disable the [video] tag."<br />When you do this, any previous nodes that have the [video] tag in them will now display that tag as text, so you\'ll want to edit and remove those.</li><li>Go to the directory for the theme that you\'re using and make a duplicate of the "node.tpl.php" file.</li><li>You\'ll need to rename this new template file after your content type.  For instance, if you have a content type named "Video", you would rename the duplicate file "node-video.tpl.php".</li><li>Open up your new template file and find the line that says "print $content;".  Replace that with the following:<br />
+      &lt;?php<br />
+      &nbsp;&nbsp;if ($teaser): /* teaser */<br />
+      &nbsp;&nbsp;&nbsp;&nbsp;print flashvideo_get_thumbnail($node);<br />
+      &nbsp;&nbsp;else: /* full node */<br />
+      &nbsp;&nbsp;&nbsp;&nbsp;print flashvideo_get_video($node, $params);<br />
+      &nbsp;&nbsp;&nbsp;&nbsp;print $content;<br />
+      &nbsp;&nbsp;endif;<br />
+      ?&gt;</li><li>Reload your node and you should see the video automatically.</li><li>When new videos are created, they should appear without needing to do anything other than the initial upload, save, and cron run.</li></ul>';
+      $output .= '<a name="trouble"></a><h3>'. t('Troubleshooting') .'</h3>';
+      $output .= '<p><strong>'. t('Question: After I submit my node and run cron, all I see is "Video Currently not Available". What is the cause?') .'</strong></p>';
+      $output .= '<p>'. t('Answer: Your video may not have successfully converted. When FlashVideo cannot successfully convert a video using the FFMPEG binary, it will usually report the error to you onscreen after a cron run.  Try taking that command that is shown to you and running it yourself from the command line.  When that command begins working from the command line, FlashVideo should be able to successfully convert your videos.') .'</p>';
+      $output .= '<p><strong>'. t('Question: When trying to attach a video to a node, the upload box disappears after I hit "attach".  What\'s going on?') .'</strong></p>';
+      $output .= '<p>'. t('Answer: Check your php.ini or .htaccess settings for Drupal. See the <a href="#install">Installation and Configuration</a> section above for further information.') .'</p>';
+      $output .= '<a name="importing"></a><h3>'. t('Importing Videos') .'</h3>';
+      $output .= '<p>'. t('The FlashVideo module also includes a way for someone to import a large number of videos by just placing them in a directory (using FTP or some other means).  Here is how it works.  Within the <strong>files</strong> directory, simply create a new directory and name it <strong>video_import</strong> (or you can define your own directory name within the FlashVideo Settings page).  Then, whatever video files you place within that directory will not only be added to the Drupal files table, but also be added to the FlashVideo cron cycle conversion queue.  This makes it very simple for a site administrator to add many videos to his/her site without having to upload them individually into nodes.') .'</p>';
+      $output .= '<a name="api"></a><h3>'. t('Using the FlashVideo API') .'</h3>';
+      $output .= '<p>'. t('FlashVideo makes available an API that allows developers to hook into the FlashVideo system to add specific conversion utilities besides the default FFMPEG utility.  It does this through a system of hooks that can be used to override how the FlashVideo module performs its conversion routine.  These hooks are as follows:') .'</p>';
+
+      $header = array(t('Hook Name'), t('Description'));
+      $rows[] = array(t('<b>flashvideo_submit</b>'), t('This hook gets invoked when the user presses the Submit button on a node insertion and update.  The default parameters are passed to this hook.'));
+      $rows[] = array(t('<b>flashvideo_get_params</b>'), t('This hook gets invoked just before the actual conversion is performed allowing you to override any of the default parameters.'));
+      $rows[] = array(t('<b>flashvideo_save_file</b>'), t('This hook gets invoked when the FlashVideo module has finished converting the FLV video and is saving it in the database.'));
+      $rows[] = array(t('<b>flashvideo_get_file</b>'), t('This hook allows other modules to catch the FlashVideo module right before it sets the filepath of the video allowing them to override the path of the video.  Great for external storage plugins.'));
+      $rows[] = array(t('<b>flashvideo_delete_file</b>'), t('This hook gets invoked when the FlashVideo module is deleting a file from the database.'));
+      $output .= '<br />'. theme('table', $header, $rows) .'<br />';
+      $rows = array();
+      $output .= '<p>'. t('The following table is a list of all parameters that can be overidden within these hooks:') .'</p>';
+      $header = array(t('Parameter Name'), t('Type'), t('Description'));
+      $rows[] = array(t('<b>output_dir</b>'), t('Text'), t('Used to determine the output directory.  This is relative to the system files directory.'));
+      $rows[] = array(t('<b>cmd_path</b>'), t('Text'), t('Used to specify the CWD path to the conversion utility executable.  Be sure to include the executable in the path.  Example <em>/usr/bin/ffmpeg</em>'));
+      $rows[] = array(t('<b>video_args</b>'), t('Text'), t('The arguments given to the conversion utility executable to generate a video.  The same format should be used as in the FlashVideo Settings.'));
+      $rows[] = array(t('<b>thumb_args</b>'), t('Text'), t('The arguments given to the ffmpeg executable to generate a thumbnail.  The same format should be used as in the FlashVideo Settings.'));
+      $rows[] = array(t('<b>thumbsize</b>'), t('Text'), t('The thumbnail size specified in the following format "WIDTH x HEIGHT".  Example <em>130x100</em>'));
+      $rows[] = array(t('<b>thumbwidth</b>'), t('Integer'), t('The thumbnail width.'));
+      $rows[] = array(t('<b>thumbheight</b>'), t('Integer'), t('The thumbnail height.'));
+      $rows[] = array(t('<b>thumbtime</b>'), t('Text'), t('The amount of time to delay before taking a snapshot of the video. Should be in the format: 00:00:00 (hours:minutes:seconds)'));
+      $rows[] = array(t('<b>thumbsecs</b>'), t('Integer'), t('The number of seconds to delay before taking a snapshot of the video.'));
+      $rows[] = array(t('<b>thumbext</b>'), t('Text'), t('The extension of the output thumbnail.  Example: For JPG\'s this would be <em>jpg</em>'));
+      $rows[] = array(t('<b>videoext</b>'), t('Text'), t('The extension of the output video.  Example: For output FLV\'s, this would be <em>flv</em>'));
+      $rows[] = array(t('<b>videomime</b>'), t('Text'), t('The mime type of the output video.'));
+
+      $output .= '<br />'. theme('table', $header, $rows) .'<br />';
+      $output .= '<p>'. t('Please Refer to the FlashVideo CCK plugin to observe how to utilize this new API.') .'</p><br /><a name="admin"></a>';
+      return $output;
+    case 'admin/settings/modules#description':
+      return t('Allows you to insert videos into nodes.');
+  }
+}
+
+/**
+ * Implementation of hook_perm().
+ */
+function flashvideo_perm() {
+  return array('administer flashvideo', 'download original');
+}
+
+/**
+ *   Extracts the [FileType, MimeType, Player] string into an array.
+ */
+function flashvideo_get_allowed_filetypes() {
+
+  // Get the filetype string.
+  $filestring = flashvideo_variable_get(NULL, 'flashvideo_video_filetypes', FLASHVIDEO_FILETYPE_STRING);
+
+  // Split the file infos.
+  $filetypes = preg_split("/[\n\r]+/", $filestring);
+
+  // Default our File Array.
+  $filearray = array();
+
+  // Make sure that there are filetypes before we iterate.
+  if (count($filetypes)) {
+
+    // Iterate through our filetypes.
+    foreach ($filetypes as $filetype) {
+
+      // Replace all white space and brackets.
+      $filetype = preg_replace("/[\s\[\]]+/", "", $filetype);
+
+      // Split the parameters in their own array.
+      $fileinfo = explode(",", $filetype);
+
+      // Only continue if there three parameters. Anything else is not valid.
+      if (count($fileinfo) == 3) {
+
+        // Set the mime type of the file.
+        $filearray[$fileinfo[0]]['mimetype']  = $fileinfo[1];
+
+        // Set the player of the file.
+        $filearray[$fileinfo[0]]['player']    = $fileinfo[2];
+      }
+    }
+  }
+
+  // Return the file array
+  return $filearray;
+}
+
+/**
+ * Implementation of hook_theme().
+ */
+function flashvideo_theme() {
+  $themes = array();
+
+  // Set up the theme for playing the video
+  $themes['flashvideo_play'] = array(
+    'template' => 'flashvideo-play',
+    'arguments' => array('video' => NULL, 'url' => NULL, 'text' => NULL)
+  );
+
+  // Set up the theme to show the embed text box.
+  $themes['flashvideo_embed'] = array(
+    'template' => 'flashvideo-embed',
+    'arguments' => array('object' => NULL, 'node_type' => NULL)
+  );
+
+  // Set up the theme for showing the video thumbnail
+  $themes['flashvideo_thumbnail'] = array(
+    'template' => 'flashvideo-thumbnail',
+    'arguments' => array('link' => NULL, 'url' => NULL, 'nid' => NULL, 'width' => NULL, 'height' => NULL)
+  );
+
+  // Get all the allowed filetypes.
+  $filetypes = flashvideo_get_allowed_filetypes();
+
+  // Iterate through each filetype.
+  foreach ($filetypes as $type => $filetype) {
+    // If the filetypes are set and they have a valid player, then we will want to
+    // set up the theme for that player.
+    if (isset($filetypes[$type]) && $filetypes[$type] && $filetypes[$type]['player']) {
+
+      // Set up the theme for that player.
+      $themes['flashvideo_'. $filetype['player']] = array(
+        'template' => 'flashvideo-'. $filetype['player'],
+        'arguments' => array('video' => NULL)
+      );
+    }
+  }
+
+  // Return the themes back to the system.
+  return $themes;
+}
+
+/**
+ * Preprocess the variables before being passed to the player specific themes.
+ *
+ * @param $variables
+ *   An array of all the variables that will be passed to the player templates.
+ */
+function flashvideo_template_preprocess(&$variables) {
+  // Get the node type.
+  $node_type = $variables['video']['node_type'];
+
+  // Create a variable for the flash players path.
+  $variables['player'] = check_url(file_create_url(flashvideo_variable_get($node_type, 'player', 'Player.swf')));
+
+  // Create a variable for the window mode for the player.
+  $variables['wmode'] = flashvideo_variable_get($node_type, 'mode', 'window');
+
+  // Create a variable that will be a string of the flashvars to be passed to the flash player.
+  $variables['flashvars'] = flashvideo_get_flashvars($variables['video']);
+
+  // Create a variable of any extra params.
+  $variables['params'] = _flashvideo_get_parameters($variables['video']);
+
+  // Switch based off of the type of video.
+  switch ($variables['video']['type']) {
+    // For google videos, we need too take out the "google-" at the beginning.
+    case 'googlevideo':
+      $variables['videoid'] = drupal_substr($variables['video']['file'], 7);
+      break;
+    // For brightcove videos, we need to take out the "brightcove-" at the beginning.
+    case 'brightcove':
+      $variables['videoid'] = drupal_substr($variables['video']['file'], 11);
+      break;
+    // For vimeo videos, we need to take out the "vimeo-" at the beginning.
+    case 'vimeo':
+      $variables['videoid'] = drupal_substr($variables['video']['file'], 6);
+      break;
+    // Anything else we will just set the $videoid as if it was a YouTube video.
+    case 'youtube':
+    default:
+      $variables['videoid'] = $variables['video']['file'];
+      break;
+  }
+}
+
+/**
+ *  For the template pre-process for the player specific themes, we just want to use a single
+ *  method for setting up the variables to be used in that those themes.
+ */
+function template_preprocess_flashvideo_flash(&$variables) {
+  flashvideo_template_preprocess($variables);
+}
+function template_preprocess_flashvideo_googlevideo(&$variables) {
+  flashvideo_template_preprocess($variables);
+}
+function template_preprocess_flashvideo_youtube(&$variables) {
+  flashvideo_template_preprocess($variables);
+}
+function template_preprocess_flashvideo_brightcove(&$variables) {
+  flashvideo_template_preprocess($variables);
+}
+function template_preprocess_flashvideo_vimeo(&$variables) {
+  flashvideo_template_preprocess($variables);
+}
+
+/**
+ *  The main theme for showing a video.  It will populate the $video_object variable based on a theme
+ *  given by the video type.  It will also populate the $video_embed variable based on the theme called
+ *  from flashvideo_embed.
+ */
+function template_preprocess_flashvideo_play(&$variables) {
+
+  // Populate the $video_object variable based on the player specific theme.
+  $variables['video_object'] = theme('flashvideo_'. $variables['video']['type'], $variables['video']);
+
+  // Populate the $video_embed variable based on the theme for "flashvideo_embed"
+  $variables['video_embed'] = theme('flashvideo_embed', $variables['video_object'], $variables['video']['node_type']);
+
+}
+
+/**
+ *  Populates and returns a FlashVars string.
+ *
+ *  To allow for custom usage for the FlashVar string, the FlashVideo module has
+ *  put into place a method for creating custom FlashVar strings.  You can do this two
+ *  ways; by either specifying it within the FlashVideo Settings where it says "Custom FlashVars"
+ *  which will be used for that node type, or you can be more specific by using the [video] tag
+ *  for each video uploaded to that node using the following schema:
+ *
+ *       [video: flashvar|param=value]
+ *
+ *    where "flashvar" indicates that the parameter is a FlashVar followed by a "|"
+ *    and then your FlashVar parameter and value.  For example, if I want to set my intro
+ *    image for my video as "intro.jpg", my [video] tag would look like the following:
+ *
+ *       [video: flashvar|image=intro.jpg]
+ *
+ *  If you wish to use the API function call, then all you will need to do then is just
+ *  add a sub array under 'flashvars' in the $params array like the following and then pass
+ *  that $params array to the "flashvideo_get_video" API call.
+ *
+ *       $params['flashvars']['parameter'] = value
+ *
+ *  @param $video
+ *   An array contining information about the video to be played.
+ *
+ *  @return
+ *   A string representation of the FlashVars to be passed to the flash player.
+ */
+function flashvideo_get_flashvars($video) {
+
+  // Get the basic FlashVar string.
+  $flashvars = flashvideo_variable_get($video['node_type'], 'flashvars', 'file=@video');
+
+  // Boolean to determine if we are using a playlist or not.
+  $playlist = (strpos($video['file'], 'getplaylist') !== FALSE);
+
+  // Set up the output directory.
+  $output_dir = flashvideo_variable_get($video['node_type'], 'outputdir', '');
+  $output_dir = ($output_dir == '') ? $output_dir : ($output_dir .'/');
+
+  // Determine the intro image for the video.
+  if (!isset($video['flashvars']['image']) && (strpos($flashvars, 'image') === FALSE)) {
+
+    // If it is a playlist or if they do not want the thumbnail to be used as the intro image.
+    if ($playlist || (flashvideo_variable_get($video['node_type'], 'introthumb', 1) == 0)) {
+
+      // Make sure that the introimg variable is actually valid.
+      if (flashvideo_variable_get($video['node_type'], 'introimg', '') != '') {
+
+        // Set up the intro image as what they specified in the "introimg" user variable.
+        $video['flashvars']['image'] = check_url(file_create_url($output_dir . flashvideo_variable_get($video['node_type'], 'introimg', '')));
+      }
+    }
+    else {
+
+      // They want to use the video thumbnail as the intro image.
+      $video['flashvars']['image'] = check_url(preg_replace("/\.flv|\.mp4/", ".jpg", $video['file']));
+    }
+  }
+
+  // If they have an intro image set, then we need to figure out how long to show it.
+  if (!isset($video['flashvars']['rotatetime']) && $video['flashvars']['image'] && (strpos($flashvars, 'rotatetime') === FALSE)) {
+    $video['flashvars']['rotatetime'] = flashvideo_variable_get($video['node_type'], 'introtime', '3');
+  }
+
+  // Set up the logo image.
+  if (!isset($video['flashvars']['logo']) && (flashvideo_variable_get($video['node_type'], 'logo', '') != '') && (strpos($flashvars, 'logo') === FALSE)) {
+    $video['flashvars']['logo'] = check_url(file_create_url(flashvideo_variable_get($video['node_type'], 'logo', '')));
+  }
+
+  // Set up the URL link for the logo image.
+  if (!isset($video['flashvars']['link']) && (flashvideo_variable_get($video['node_type'], 'logolink', '') != '') && (strpos($flashvars, 'link') === FALSE)) {
+    $video['flashvars']['link'] = flashvideo_variable_get($video['node_type'], 'logolink', '');
+  }
+
+  // Set up the repeat parameter for the video player.
+  if (!isset($video['flashvars']['repeat']) && (flashvideo_variable_get($video['node_type'], 'repeattype', 'false') != 'false') && (strpos($flashvars, 'repeat') === FALSE)) {
+    $video['flashvars']['repeat'] = flashvideo_variable_get($video['node_type'], 'repeattype', 'false');
+  }
+
+  // For reverse functionality, set up the autostart parameter.
+  if ($video['autostart'] && strpos($flashvars, 'autostart') === FALSE) {
+    $video['flashvars']['autostart'] = $video['autostart'];
+  }
+
+  // Set up the streamer parameter if they're using the FlashVideo Streaming module
+  if (!isset($video['flashvars']['streamer']) && flashvideo_variable_get($video['node_type'], 'streamer', '') != '' && strpos($flashvars, 'streamer') === FALSE && flashvideo_variable_get($video['node_type'], 'streaming_enable', '') != '') {
+    $video['flashvars']['streamer'] = flashvideo_variable_get($video['node_type'], 'streamer', '');
+  }
+
+  // If they specify some flashvars, then we want to add them to the FlashVar string.
+  if ($video['flashvars'] && (count($video['flashvars']) > 0)) {
+    foreach ($video['flashvars'] as $flashvar => $value) {
+      $flashvars .= '&'. $flashvar .'='. $value;
+    }
+  }
+
+  // Set up the markup and actual data arrays.
+  $markup = array('@video', '@thumbnail');
+  $actual = array($video['file'], check_url(preg_replace("/\.flv|\.mp4/", ".jpg", $video['file'])));
+  return str_replace($markup, $actual, $flashvars);
+}
+
+/**
+ * Gets the HTML representation of the video.
+ *
+ * @param $video
+ *   An array of parameters to be used by the shown video.
+ *
+ * @return
+ *   String representing the HTML of the video to be displayed.
+ */
+function flashvideo_play($video) {
+
+  // Get the filetype of the video to be shown.
+  $filetype = $video['override'] ? 'flv' : _flashvideo_get_filetype($video['file']);
+
+  // Get all the allowed filetypes.
+  $filetypes = flashvideo_get_allowed_filetypes();
+
+  // If this is a valid filetype and also has a player associated with this file type...
+  if (isset($filetypes[$filetype]) && $filetypes[$filetype] && $filetypes[$filetype]['player']) {
+
+    // Want to set the type of the video based on the player that will play this video.
+    $video['type'] = $filetypes[$filetype]['player'];
+
+    // Switch on what player you want to show the video with.
+    switch ($video['type']) {
+      case 'flash':
+        return theme('flashvideo_play', $video, t('http://get.adobe.com/flashplayer/'), t('Download latest Flash Player'));
+      case 'youtube':
+        return theme('flashvideo_play', $video, t('http://www.youtube.com/t/help_center'), t('youTube.com'));
+      case 'googlevideo':
+        return theme('flashvideo_play', $video, t('http://video.google.com/support'), t('video.google.com'));
+      default:
+        return theme('flashvideo_play', $video, '', '');
+    }
+  }
+  else {
+    // Return that the given file type is not supported.
+    return _flashvideo_get_filetype($video['file']) .' filetypes are not supported';
+  }
+}
+
+/**
+ * Implementation of hook_form_alter().
+ */
+function flashvideo_form_alter(&$form, $form_state, $form_id) {
+
+  // Make sure it is a form.
+  if (isset($form['type'])) {
+
+    // Get the node type from the form being shown.
+    $node_type = $form['type']['#value'];
+
+    // Make sure that this is actually a form for that node type.
+    if ($form['#parameters'][0] == $node_type .'_node_form') {
+
+      // Check to make sure that they have enabled FlashVideo for this node type.
+      if (flashvideo_variable_get($node_type, 'enable', 0)) {
+
+        if (module_exists('filefield') && flashvideo_variable_get(NULL, 'flashvideo_filefield', 0)) {
+          // What are the names of the finished video and thumbnail fields? Let's find out and hide them from display.
+          $cck_finished_video_field = flashvideo_variable_get($node_type, 'cck_finished_video_field', '');
+          if (isset($form[$cck_finished_video_field])) {
+            // Hide field.
+            $form[$cck_finished_video_field]['#type'] = 'hidden';
+          }
+          elseif (module_exists('fieldgroup') && ($group_name = fieldgroup_get_group($node_type, $cck_finished_video_field)) && isset($form[$group_name][$cck_finished_video_field])) {
+            // Hide group.
+            $form[$group_name][$cck_finished_video_field]['#type'] = 'hidden';
+          }
+          $cck_finished_thumbnail_field = flashvideo_variable_get($node_type, 'cck_finished_thumbnail_field', '');
+          if (isset($form[$cck_finished_thumbnail_field])) {
+            // Hide field.
+            $form[$cck_finished_thumbnail_field]['#type'] = 'hidden';
+          }
+          elseif (module_exists('fieldgroup') && ($group_name = fieldgroup_get_group($node_type, $cck_finished_thumbnail_field)) && isset($form[$group_name][$cck_finished_thumbnail_field])) {
+            // Hide group.
+            $form[$group_name][$cck_finished_thumbnail_field]['#type'] = 'hidden';
+          }
+        }
+        elseif (isset($form['attachments'])) { // See if the attachments field is defined in this form.
+
+          // Change the title based on what they want in the FlashVideo Settings.
+          $form['attachments']['#title'] = flashvideo_variable_get($node_type, 'title', t('Video Upload'));
+
+          // Expand it so that it is visible.
+          $form['attachments']['#collapsed'] = FALSE;
+
+          // Set the weight according to what they specified.
+          $form['attachments']['#weight'] = flashvideo_variable_get($node_type, 'weight', -10);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Implementation of hook_menu().
+ */
+function flashvideo_menu() {
+  $items = array();
+
+  // The Flash Video Settings menu item.
+  $items['admin/settings/flashvideo'] = array(
+    'title' => 'FlashVideo',
+    'description' => 'Administer the FlashVideo module.',
+    'page callback' => 'flashvideo_settings',
+    'access arguments' => array('administer flashvideo'),
+    'file' => 'flashvideo.admin.inc',
+  );
+
+  $items['admin/settings/flashvideo/ctypes'] = array(
+    'title' => 'Content Type Settings',
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => 0,
+    'access arguments' => array('administer flashvideo'),
+  );
+
+  $items['admin/settings/flashvideo/universal'] = array(
+    'title' => 'Universal Settings',
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 1,
+    'access arguments' => array('administer flashvideo'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('flashvideo_universal_settings_form'),
+    'file' => 'flashvideo.admin.inc',
+  );
+
+  // Menu item to get the XML representation for playlists.
+  $items['getplaylist'] = array(
+    'page callback' => 'flashvideo_getplaylist',
+    'page arguments' => array(1),
+    'type' => MENU_CALLBACK,
+    'access callback' => 'user_access',
+    'access arguments' => array('access content'),
+    'file' => 'flashvideo.playlist.inc',
+  );
+
+  // Administration settings for a specific node type.
+  $items['admin/settings/flashvideo/edit'] = array(
+    'title' => 'Edit FlashVideo Settings',
+    'page callback' => 'flashvideo_settings_main',
+    'page arguments' => array(4),
+    'type' => MENU_CALLBACK,
+    'access callback' => 'user_access',
+    'access arguments' => array('administer flashvideo'),
+    'file' => 'flashvideo.admin.inc',
+  );
+
+  return $items;
+}
+
+/**
+ * Pull the file extension from a filename
+ *
+ * @param $vidfile
+ *  string filename to get the filetype from.
+ *
+ * @return
+ *  string value of file type or boolean FALSE on error
+ */
+function _flashvideo_get_filetype($vidfile) {
+
+  // Initialize our file type as FALSE.
+  $file_type = FALSE;
+
+  // They are wanting to show a playlist
+  if (strpos($vidfile, 'getplaylist') !== FALSE) {
+    $file_type = 'playlist';
+  }
+
+  // Normal file. Just return the extension.
+  elseif (strstr($vidfile, '.')) {
+    $file_type = drupal_strtolower(get_file_ext($vidfile));
+  }
+
+  // See if it is a Google Video
+  elseif (strpos($vidfile, 'google-') === 0) {
+    $file_type = 'googlevideo';
+  }
+
+  // See if it is a Brightcove video.
+  elseif (strpos($vidfile, 'brightcove-') === 0) {
+    $file_type = 'brightcove';
+  }
+
+  // See if it is a Vimeo video.
+  elseif (strpos($vidfile, 'vimeo-') === 0) {
+    $file_type = 'vimeo';
+  }
+
+  // See if it is a YouTube video
+  elseif (!strpos($vidfile, '.') && !strpos($vidfile, '/') && !strpos($vidfile, '\\') && drupal_strlen($vidfile) == 11) {
+    $file_type = 'youtube';
+  }
+
+  return $file_type;
+}
+
+/**
+ * Returns the correct video mime-type for the video. Returns false if the file is not a supported video type.
+ *
+ * @param $filename
+ *  The name or path of the file you wish to get the mime type of.
+ *
+ * @param $extension
+ *  A boolean to indicate whether or not the name is JUST an extension, or is a filetype
+ *
+ * @return Mimetype for known video types, FALSE file is not a supported video type.
+ */
+function _flashvideo_get_mime_type($filename, $extension = FALSE) {
+
+  // Are they providing the extension already?  If so, then we don't need to call get_filetype function.
+  $filetype = $extension ? $filename : _flashvideo_get_filetype($filename);
+
+  // Get all the allowed filetypes.
+  $filetypes = flashvideo_get_allowed_filetypes();
+
+  // If this is a valid mime type, then return it, otherwise return FALSE.
+  if (isset($filetypes[$filetype]) && $filetypes[$filetype]['mimetype'])
+    return $filetypes[$filetype]['mimetype'];
+  else
+    return FALSE;
+}
+
+/**
+ * Performs the post operations after a successful conversion.
+ *
+ * @param $oldfile
+ *  A standard Drupal file object of the old file
+ *
+ * @param $newfile
+ *  A standard Drupal file object of the new file
+ *
+ * @param $node_type
+ *  The current node type
+ *
+ * @param $create_thumbnail
+ *  Boolean to tell the routine if you just want to create a thumbnail
+ *
+ */
+function _flashvideo_perform_postop($oldfile, $newfile, $node_type, $create_thumbnail = FALSE) {
+
+  $timestamp = time();
+
+  if ((_flashvideo_get_filetype($oldfile->filepath) == 'flv' || _flashvideo_get_filetype($oldfile->filepath) == 'mp4') && !$create_thumbnail) {
+    db_query("UPDATE {files} SET filepath='%s', filename='%s', filesize=%d WHERE fid=%d", $newfile->filepath, $newfile->filename, $newfile->filesize, $newfile->fid);
+
+    // Insert this video into the flashvideo table if it is not already in there.
+    if (!db_result(db_query("SELECT COUNT(*) FROM {flashvideo} WHERE oid=%d AND fid=%d AND nid=%d", $newfile->fid, $newfile->fid, $newfile->nid))) {
+      // Insert this video into the flashvideo table.
+      db_query("INSERT INTO {flashvideo} (fid, nid, oid, status, video_index, width, height, flags) VALUES (%d, %d, %d, %d, %d, %d, %d, 0)", $newfile->fid, $newfile->nid, $oldfile->fid, FLASHVIDEO_STATUS_CONVERTED, $params->video_index, $params->width, $params->height);
+      db_query("INSERT INTO {ffmpeg_data} (fid, created, input_file, output_file, status) VALUES (%d, %d, '%s', '%s', %d)", $oldfile->fid, $timestamp, $oldfile->filepath, $newfile->filepath, 1);
+    }
+  }
+  else {
+    // Create a temporary file for the new file.
+    db_query("INSERT INTO {files} (uid, filename, filepath, filemime, filesize, status, timestamp) VALUES (%d, '%s', '%s', '%s', %d, %d, %d)", $newfile->uid, $newfile->filename, $newfile->filepath, $newfile->filemime, $newfile->filesize, FILE_STATUS_TEMPORARY, time());
+
+    // Get the new File ID
+    $newfile->fid = db_last_insert_id('files', 'fid');
+
+    // Look to make sure that the File ID doesn't already exists in the files table.
+    $found = db_result(db_query("SELECT COUNT(*) FROM {files} WHERE filepath='%s' AND status=%d", $newfile->filepath, FILE_STATUS_PERMANENT));
+
+    // If the file isn't already in the files table...
+    if ($found == 0) {
+
+      // Grab the width, height, and video_index from the original video to copy over to the new video, then insert the new video in the flashvideo table.
+      $params = db_fetch_object(db_query("SELECT video_index, width, height FROM {flashvideo} WHERE fid = %d", $oldfile->fid));
+
+      // Figure out the vid for this node.
+      $sql = "SELECT vid FROM {node} WHERE nid = %d";
+      $newfile->vid = db_result(db_query($sql, $newfile->nid));
+
+      // Create the appropriate database entry for the newly converted video file.
+      if (module_exists('filefield') && flashvideo_variable_get(NULL, 'flashvideo_filefield', 0)) { // Using FileField
+        // Names of the different video fields? Ask CCK for the details.
+        $cck_original_video_field = content_fields(flashvideo_variable_get($node_type, 'cck_original_video_field', ''), $node_type);
+        $cck_finished_video_field = content_fields(flashvideo_variable_get($node_type, 'cck_finished_video_field', ''), $node_type);
+        $cck_finished_thumbnail_field = content_fields(flashvideo_variable_get($node_type, 'cck_finished_thumbnail_field', ''), $node_type);
+        // Ask CCK for db info about the fields (table names and column info)
+        $cck_original_video_field_db_info = content_database_info($cck_original_video_field);
+        $cck_finished_video_field_db_info = content_database_info($cck_finished_video_field);
+        $cck_finished_thumbnail_field_db_info = content_database_info($cck_finished_thumbnail_field);
+        
+        if ($create_thumbnail) { // This is for the finished thumbnail.
+          // For single-upload file fields
+          if ($cck_finished_thumbnail_field['db_storage'] == 1) {
+            // db_storage = 0 means 'stored in its own table'.  Single upload fields = 1.  Shared fields and Multi-values = 0.
+            db_query("UPDATE {". $cck_finished_thumbnail_field_db_info['table'] ."} SET ". $cck_finished_thumbnail_field_db_info['columns']['fid']['column'] ." = %d, ". $cck_finished_thumbnail_field_db_info['columns']['list']['column'] ." = 0 WHERE nid = %d", $newfile->fid, $newfile->nid);
+          }
+          else { // For multi-upload file fields
+            // Get rid of the initial NULL entry.
+            db_query("DELETE FROM {". $cck_finished_thumbnail_field_db_info['table'] ."} WHERE nid = %d AND ". $cck_finished_thumbnail_field_db_info['columns']['fid']['column'] ." IS NULL", $newfile->nid);
+            db_query("INSERT INTO {". $cck_finished_thumbnail_field_db_info['table'] ."} (vid, nid, delta, ". $cck_finished_thumbnail_field_db_info['columns']['fid']['column'] .", ". $cck_finished_thumbnail_field_db_info['columns']['list']['column'] .") VALUES (%d, %d, %d, %d, 0)", $newfile->vid, $newfile->nid, $params->video_index, $newfile->fid);
+          }
+        }
+        else { // This is for the finished video.
+          // For single-upload file fields
+          if ($cck_finished_video_field['db_storage'] == 1) {
+            // db_storage = 0 means 'stored in its own table'.  Single upload fields = 1.  Shared fields and Multi-values = 0.
+            db_query("UPDATE {". $cck_finished_video_field_db_info['table'] ."} SET ". $cck_finished_video_field_db_info['columns']['fid']['column'] ." = %d, ". $cck_finished_video_field_db_info['columns']['list']['column'] ." = 0 WHERE nid = %d", $newfile->fid, $newfile->nid);
+          }
+          else { // For multi-upload file fields
+            // Get rid of the initial NULL entry.
+            db_query("DELETE FROM {". $cck_finished_video_field_db_info['table'] ."} WHERE nid = %d AND ". $cck_finished_video_field_db_info['columns']['fid']['column'] ." IS NULL", $newfile->nid);
+            db_query("INSERT INTO {". $cck_finished_video_field_db_info['table'] ."} (vid, nid, delta, ". $cck_finished_video_field_db_info['columns']['fid']['column'] .", ". $cck_finished_video_field_db_info['columns']['list']['column'] .") VALUES (%d, %d, %d, %d, 0)", $newfile->vid, $newfile->nid, $params->video_index, $newfile->fid);
+          }
+        }
+        cache_clear_all('content:'. $newfile->nid .':'. $newfile->vid, 'cache_content'); // Clear the CCK cache for this node.
+
+      }
+      else { // They're using the core Upload module.
+        // Add the video into the upload table.
+        db_query("INSERT INTO {upload} (fid, nid, vid, description, list) VALUES (%d, %d, %d, '%s', 0)", $newfile->fid, $newfile->nid, $newfile->vid, $newfile->description);
+      }
+
+      // Insert this video into the flashvideo table.
+      db_query("INSERT INTO {flashvideo} (fid, nid, oid, status, video_index, width, height, flags) VALUES (%d, %d, %d, %d, %d, %d, %d, 0)", $newfile->fid, $newfile->nid, $oldfile->fid, FLASHVIDEO_STATUS_CONVERTED, $params->video_index, $params->width, $params->height);
+
+      // If we are not creating a thumbnail...
+      if (!$create_thumbnail) {
+        // If they wish to delete the original video...
+        if (flashvideo_variable_get($node_type, 'delete', 0) && (get_file_ext($oldfile->filepath) != 'flv' || get_file_ext($oldfile->filepath) != 'mp4')) {
+          // Delete the original file from the file system.
+          file_delete($oldfile->filepath);
+
+          // Delete the original file from the files table.
+          db_query("DELETE FROM {files} WHERE fid = %d", $oldfile->fid);
+
+          // Delete the original file from the appropriate table.
+          if (module_exists('filefield') && flashvideo_variable_get(NULL, 'flashvideo_filefield', 0)) { // Using FileField
+            // Names of the different video fields? Ask CCK for the details.
+            $cck_original_video_field = content_fields(flashvideo_variable_get($node_type, 'cck_original_video_field', ''), $node_type);
+            // Ask CCK for db info about the fields (table names and column info)
+            $cck_original_video_field_db_info = content_database_info($cck_original_video_field);
+            // For single-upload file fields
+            if ($cck_original_video_field['db_storage'] == 1) {
+              db_query("UPDATE {". $cck_original_video_field_db_info['table'] ."} SET ". $cck_original_video_field_db_info['columns']['fid']['column'] ." = NULL, ". $cck_original_video_field_db_info['columns']['list']['column'] ." = NULL WHERE nid = %d", $oldfile->nid);
+            }
+            else { // For multi-upload file fields
+              db_query("DELETE FROM {". $cck_original_video_field_db_info['table'] ."} WHERE nid = %d", $node->nid);
+            }
+          }
+          else { // They're using the core Upload module.
+            db_query("DELETE FROM {upload} WHERE fid = %d", $oldfile->fid);
+          }
+
+          // Delete the file from the flashvideo table.
+          db_query("DELETE FROM {flashvideo} WHERE fid=%d", $oldfile->fid);
+
+          // Allow other modules do do some delete operations.
+          module_invoke_all('flashvideo_delete_file', $oldfile, $node_type);
+        }
+
+        // Now insert this successful conversion into the ffmpeg_data table.
+        db_query("INSERT INTO {ffmpeg_data} (fid, created, input_file, output_file, status) VALUES (%d, %d, '%s', '%s', %d)", $oldfile->fid, $timestamp, $oldfile->filepath, $newfile->filepath, 1);
+      }
+    }
+    else {
+      // If the file was found, then all we need to do is just update the table information about that file.
+      db_query("UPDATE {files} SET filepath='%s', filename='%s', filesize=%d WHERE fid=%d", $newfile->filepath, $newfile->filename, $newfile->filesize, $newfile->fid);
+    }
+
+    // Set the status of the new file to be a permanent file.
+    file_set_status($newfile, FILE_STATUS_PERMANENT);
+  }
+
+  // If they opt to change the status of the node.
+  if (flashvideo_variable_get($node_type, 'status', 1)) {
+    // Update the status of the node.
+    db_query("UPDATE {node} SET status = 1 WHERE nid=%d", $oldfile->nid);
+  }
+
+  // Tell other modules to save this file.
+  module_invoke_all('flashvideo_save_file', $newfile, $node_type);
+
+  // Set the status of this video to say it is converted and also set all flags to zero.
+  db_query("UPDATE {flashvideo} SET status=%d, flags=0 WHERE nid=%d AND (oid=fid)", FLASHVIDEO_STATUS_CONVERTED, $newfile->nid);        // Set the status to converted.
+
+  // Empty the cache so your node updates.
+  cache_clear_all(NULL, 'cache');
+  if (module_exists('filefield') && flashvideo_variable_get(NULL, 'flashvideo_filefield', 0)) { // Using FileField
+    cache_clear_all(NULL, 'cache_content');
+  }
+}
+
+/**
+ * Gets the default parameters needed to run the conversion.
+ *
+ * @param $node_type
+ *   The current node type.
+ *
+ * @return
+ *   An array of all the parameters used in the video and thumbnail conversion.
+ */
+function flashvideo_get_convert_params($node_type) {
+
+  // Set the output directory.
+  $params['output_dir'] = flashvideo_variable_get($node_type, 'outputdir', '');
+
+  // Sets the original directory.
+  $params['originaldir'] = flashvideo_variable_get($node_type, 'originaldir', '');
+
+  // Set the ffmpeg command path.
+  $params['cmd_path'] = flashvideo_variable_get(NULL, 'flashvideo_binpath', '/usr/bin/ffmpeg');
+
+  // Set the flvtool2 command path.
+  $params['metadata_cmd_path'] = flashvideo_variable_get(NULL, 'flashvideo_binpath_metadata', '');
+
+  // Set the video command arguments.
+  $params['video_args'] = flashvideo_variable_get($node_type, 'cmd', '-i @input -f flv -acodec mp3 -ar 22050 -ab 64k -ac 1 @output');
+
+  // The maximium size for the video.
+  $params['maxsize'] = flashvideo_variable_get($node_type, 'maxsize', '');
+
+  // Set the thumbnail command arguments.
+  $params['thumb_args'] = flashvideo_variable_get($node_type, 'thumbcmd', '-y -i @input -vframes 1 -ss @thumbtime -an -vcodec mjpeg -f rawvideo -s @thumbsize @output');
+
+  // Set the thumbnail size as a string representation.
+  $params['thumbsize'] = flashvideo_variable_get($node_type, 'thumbsize', '130x100');
+
+  // Set the thumbnail size as integer representations by breaking up the string "width x height"
+  $size = explode('x', drupal_strtolower($params['thumbsize']));
+  $params['thumbwidth'] = trim($size[0]);
+  $params['thumbheight'] = trim($size[1]);
+
+  // Set the thumbtime as a string represation given by "hh:mm:ss"
+  $params['thumbtime'] = flashvideo_variable_get($node_type, 'thumbtime', '00:00:02');
+
+  // Set the thumbtime given as a second representation by breaking up the "hh:mm:ss" string.
+  $thumbtimes = explode(":", $params['thumbtime']);
+  array_walk($thumbtimes, create_function('&$n', '$n = intval(trim($n), 10);'));
+  $params['thumbsecs'] = ($thumbtimes[0] * 3600) + ($thumbtimes[1] * 60) + ($thumbtimes[2]);
+
+  // Set the thumbnail extension as a JPG.
+  $params['thumbext'] = 'jpg';
+
+  // Set the video extension as an FLV (flash) file.
+  $params['videoext'] = 'flv';
+
+  // Set the video mimetype as the Flash mimetype.
+  $params['videomime'] = 'flv-application/octet-stream';
+
+  // Default these variables to true.
+  $params['create_thumb'] = TRUE;
+  $params['create_video'] = TRUE;
+  return $params;
+}
+
+/**
+ * New and improved version of video format conversion.  More generic so that it can be easily called outside of cron job,
+ * and with a different conversion utility.
+ *
+ * @param $file
+ *  A Standard Drupal File object
+ *
+ * @param $node_type
+ *  The current node type.
+ *
+ * @param $create_thumbnail
+ *  Boolean to tell the routine if you want to create a thumbnail.
+ *
+ * @param $params
+ *  An array of parameters.  Used to override functionality.  Leave blank if you wish to use defaults.
+ *     - output_dir      :  The output directory relative to the system files directory.
+ *     - originaldir      :  The output directory to contain the original video after the conversion has been made.
+ *     - cmd_path        :  The path to the ffmpeg executable.  Can be overridden with something besides ffmpeg.
+ *     - metadata_cmd_path  :  The path to the flvtool2 executable.
+ *     - maxsize        :  The maximium size you would like the video to be.
+ *     - video_args      :  The command to pass to the ffmpeg executable.
+ *     - thumb_args      :  The thumbnail command to pass to the ffmpeg executable.
+ *     - thumbsize       :  An string spcifying the width and height of the thumbnail denoted as "WIDTH x HEIGHT".
+ *     - thumbwidth      :  An integer representing the thumbnail width.
+ *     - thumbheight      :  An integer representing the thumbnail height.
+ *     - thumbtime       :  A string in the format of "00:00:00" that tells how far to advance the video before taking a snapshot.
+ *     - thumbsecs       :  An integer representing how many seconds to delay before taking a snapshot.
+ *     - thumbext        :  The output thumbnail extension.
+ *     - videoext        :  The output video extension.
+ *     - videomime       :  The output video mime.
+ *
+ * @return
+ *   TRUE - conversion was successful.
+ *   FALSE - conversion was not succesful.
+ */
+function flashvideo_convert($file, $node_type, $create_thumbnail = FALSE, $params = array()) {
+
+  // Get the default parameters.
+  $default_params = flashvideo_get_convert_params($node_type);
+
+  // If they do not provide a parameter in their overrided $param array,
+  // then we will just use the default instead.
+
+  // Iterate through all default parameters.
+  foreach ($default_params as $param => $value) {
+
+    // If the parameter is not set in the overrided params array.
+    if (!isset($params[$param])) {
+
+      // Then use the default instead.
+      $params[$param] = $value;
+    }
+  }
+
+  // Set the new file to equal the old file.
+  $newfile = drupal_clone($file);
+
+  // Get the CWD filepath.
+  $filepath = getcwd() .'/'. $file->filepath;
+
+  // Get the file extension.
+  $extension = _flashvideo_get_filetype($file->filepath);
+
+  // See if they want to use the drupal root path.
+  $useroot = flashvideo_variable_get($node_type, 'userootpath', 0);
+
+  // Only perform if this is a video.
+  if (_flashvideo_get_mime_type($extension, TRUE))  {
+
+    // Get the new filename.
+    $newfile->filename = basename($file->filepath, '.'. $extension) .'_'. $file->fid;
+
+    // Check for MP4
+    if ($extension == 'mp4')  {
+      $params['videoext'] = 'mp4';
+    }
+
+    // Set the extension.
+    $newfile->filename .= $create_thumbnail ? ".{$params['thumbext']}" : ".{$params['videoext']}";
+
+    if (!module_exists('filefield') || flashvideo_variable_get(NULL, 'flashvideo_filefield', 0) == FALSE) {
+      // Set the output directory based on if they want to use the drupal root or not.
+      $output_directory = $useroot ? $params['output_dir'] : file_directory_path() .'/'. $params['output_dir'];
+
+      // Check the output directory to make sure it exists.  Create it if it doesn't.
+      file_check_directory($output_directory, FILE_MODIFY_PERMISSIONS);
+
+      // Add a forward slash only if they have an output directory.
+      $params['output_dir'] = ($params['output_dir'] == '') ? '' : $params['output_dir'] .'/';
+
+      // Get the new filepath.
+      $newfile->filepath = $useroot ? $params['output_dir'] . $newfile->filename : file_create_path($params['output_dir'] . $newfile->filename);
+    }
+    else { // Use FileField configuration to figure out where the file should be placed.
+      // Names of the different video fields? Let's find out.
+      $cck_finished_video_field = flashvideo_variable_get($node_type, 'cck_finished_video_field', '');
+      $cck_finished_thumbnail_field = flashvideo_variable_get($node_type, 'cck_finished_thumbnail_field', '');
+      if ($create_thumbnail) {
+        $field_name = $cck_finished_thumbnail_field;
+      }
+      else {
+        $field_name = $cck_finished_video_field;
+      }
+      $field = content_fields($field_name, $node_type); // Get array of info about the field.
+      $filefield_path = $field['widget']['file_path']; // Get the specific file path that was set for the field.
+      // If they have Token module installed, search the $filefield_path for tokens and get them replaced.
+      if (module_exists('token')) {
+        $filefield_path = token_replace($filefield_path, 'user', $account);
+      }
+      $output_directory = file_directory_path() .'/'. $filefield_path;
+      file_check_directory($output_directory, TRUE);
+      $newfile->filepath = file_directory_path() .'/'. $filefield_path .'/'. $newfile->filename;
+    }
+
+    // Get the output path.
+    $output_path = getcwd() .'/'. $newfile->filepath;
+
+    // We should only continue if there is an input file.
+    if ((file_exists($filepath) && filesize($filepath) > 0)) {
+
+      $command = '';     // For scope reasons.
+      $ffmpeg_data = '';  // For scope reasons.
+
+      // If the video file is already an FLV extension, and this isn't the pass to create a thumbnail, then we will
+      // just copy the video to the output path and set the status to converted.  Otherwise, we will just
+      // go ahead and try and convert the video.
+
+      if (!$create_thumbnail && ($extension == 'flv'|| $extension == 'mp4')) {
+        // Move the file to the output directory
+        rename($filepath, $output_path);
+      }
+      else {
+
+        // Set the Status to Converting.
+        db_query("UPDATE {flashvideo} SET status=%d WHERE fid=%d", FLASHVIDEO_STATUS_CONVERTING, $file->fid);
+
+        /**
+         * If your conversion utility doesn't support the ffmpeg version of "00:00:00" for thumbnail time or
+         * "WIDTH x HEIGHT" for the thumbnail size, then you are more than welcome to unset the $params['thumbtime']
+         * and $params['thumbsize'] variables and then just use @thumbwidth, @thumbheight, or @thumbsecs in your markup
+         * command.  Or, if you require a different string representation, then all you have to do is just overwrite the $params['thumbtime']
+         * and $params['thumbsize'] variables and then just use @thumbtime and @thumbsize in your markup.
+         */
+
+        // Set the String Thumbsize variable.
+        if (isset($params['thumbsecs']) && !isset($params['thumbtime'])) {
+
+          // Set the Hours section.
+          $params['thumbtime'] =  intval($params['thumbsecs'] / 3600) .':';
+
+          // Set the Minutes section.
+          $params['thumbtime'] .= intval($params['thumbsecs'] / 60) .':';
+
+          // Set the Seconds section.
+          $params['thumbtime'] .= intval($params['thumbsecs'] % 60);
+        }
+
+        // If they didn't provide a thumbsize string, but DID provide the width and height, we can construct the thumbsize string from that.
+        if (isset($params['thumbwidth']) && isset($params['thumbheight']) && !isset($params['thumbsize'])) {
+
+          // Set the string thumbsize.
+          $params['thumbsize'] = $params['thumbwidth'] .'x'. $params['thumbheight'];
+        }
+
+        // Set up the markup and actual data arrays.
+        $markup = array('@input', '@output', '@thumbtime', '@thumbsize', '@thumbsecs', '@thumbwidth', '@thumbheight');
+        $actual = array('"'. $filepath .'"',         // The input file path.
+          '"'. $output_path .'"',       // The output file path.
+          '"'. $params['thumbtime'] .'"',  // The thumbtime provided as a string.
+          '"'. $params['thumbsize'] .'"',  // The thumbsize provided as a string.
+          $params['thumbsecs'], // The thumb time provided as an integer in seconds.
+          $params['thumbwidth'],         // The thumb width provided as an integer.
+          $params['thumbheight']);        // The thumb height provided as an integer.
+
+        // Lets check to make sure they have the right audio encoder.
+        if (!$create_thumbnail) {
+
+          // Get the format string from their ffmpeg installation.
+          $format = shell_exec($params['cmd_path'] .' -formats');
+
+          // If they are using libmp3lame, then we will need to change the command if they have
+          // mp3 as the codec.
+          if (preg_match("/EA\s+libmp3lame/mi", $format)) {
+            // Their audio codec is libmp3lame.  Lets make sure that we replace the command
+            $params['video_args'] = str_replace('-acodec mp3 ', '-acodec libmp3lame ', $params['video_args']);
+          }
+        }
+
+        // Set the command.
+        $command = ($create_thumbnail) ? $params['thumb_args'] : $params['video_args'];
+
+        // Set the maximum dimensions for conversion if necessary.
+        if (!empty($params['maxsize']) && !$create_thumbnail) {
+          // Add the size parameter to the command.
+          $command = _flashvideo_video_resize($filepath, $params['maxsize'], $command);
+        }
+
+        // Replace all markups with actual data.
+        $command = $params['cmd_path'] .' '. str_replace($markup, $actual, $command);
+
+        // Don't show the command if they opt to convert the videos immediately.
+        if (!flashvideo_variable_get($node_type, 'convert', 0)) {
+          $command_message = t('Command:') .' '. $command;
+        }
+
+        // Convert the video. Adding ' 2>&1' sends results of the command into the $ffmpeg_data variable.
+        $ffmpeg_data = shell_exec($command .' 2>&1');
+
+        // If they provide a metadata command path, then we will want to execute that now.
+        if (!empty($params['metadata_cmd_path']) && strstr($output_path, '.flv')) {
+          $metadata_command = $params['metadata_cmd_path'] ." -U '". $output_path ."'";
+          $metadata_command_message = t('Metadata Command:') .' '. $metadata_command;
+          shell_exec($metadata_command);
+        }
+      }
+
+      // Check to make sure the new file exists.
+      if (file_exists($output_path) && filesize($output_path) > 0) {
+
+        // Get the new file mimetype
+          $newfile->filemime = $create_thumbnail ? $params['thumbext'] : $params['videomime'];
+
+          // Get the new file size.
+          $newfile->filesize = filesize($output_path);
+
+        // If we are not creating a thumbnail, and they want to utilize the original output directory...
+        if (!$create_thumbnail && $params['originaldir'] != '' && $extension != 'flv') {
+
+          // Get the original directory path.
+          $original_path = $useroot ? $params['originaldir'] : file_directory_path() .'/'. $params['originaldir'];
+
+          // Check to make sure the directory exists. Create it if it doesn't.
+          file_check_directory($original_path, FILE_MODIFY_PERMISSIONS);
+
+          // Add the filename to the path.
+          $original_path .= '/'. basename($file->filepath);
+
+          // Move the file to the new path.
+          rename(getcwd() .'/'. $file->filepath, getcwd() .'/'. $original_path);
+
+          $file->filepath = $original_path;
+
+          // Change the filepath in the files table.
+          db_query("UPDATE {files} SET filepath='%s' WHERE fid=%d", $original_path, $file->fid);
+        }
+
+         // Sucess!  Perform the Post Operations.
+        _flashvideo_perform_postop($file, $newfile, $node_type, $create_thumbnail);
+
+        // Let's let the user know up-front if their conversion succeeded.
+        $success_message = t('FlashVideo successfully created:') .' '. $newfile->filename;
+        drupal_set_message($success_message);
+
+        // Return TRUE upon success.
+        return TRUE;
+      }
+      else {
+
+        // So that it will try again later.
+        db_query("UPDATE {flashvideo} SET status=%d, flags=0 WHERE fid=%d" , FLASHVIDEO_STATUS_OK, $file->fid);
+
+        // Let's let the user know up-front if their conversion failed.
+        $failure_message = t('Conversion failed.');
+        drupal_set_message($failure_message, 'error');
+        drupal_set_message($command_message, 'error');
+        if (!empty($metadata_command_message)) {
+          drupal_set_message($metadata_command_message, 'error');
+        }
+
+        // shell_exec usually doesn't return any useful data, so let's set a default message for log table.
+        if (empty($ffmpeg_data)) {
+          $ffmpeg_data = $failure_message;
+        }
+
+        // If they want to log the data, then we will set up the data field.
+        $data = flashvideo_variable_get(NULL, 'flashvideo_logdata', 0) ? "Command: {$command}\nData: {$ffmpeg_data}" : '';
+
+        // Add this failed conversion to the ffmpeg_data table.
+        $timestamp = time();
+        db_query("INSERT INTO {ffmpeg_data} (fid, created, input_file, output_file, status, data) VALUES (%d, %d, '%s', '%s', %d, '%s')", $file->fid, $timestamp, $filepath, $output_path, 0, $data);
+      }
+    }
+  }
+
+  return FALSE;
+}
+
+/**
+ * Adds a resize parameter to ffmpeg command based on admin's choice of maximum video dimensions.
+ *
+ *  @param $input_file
+ *   The original movie file which will need to be measured by ffmpeg.
+ *
+ *  @param $max_dimensions
+ *   The maximum width and height that the finished FLV can be.
+ *
+ *  @param $video_args
+ *   The current arguments going into the ffmpeg command.
+ *
+ *  @return
+ *   The finished argument string, with the size parameter added.
+ *
+ */
+function _flashvideo_video_resize($input_file, $max_dimensions, $video_args) {
+  // Set the thumbnail size as integer representations by breaking up the string "width x height"
+  $size = explode('x', drupal_strtolower($max_dimensions));
+  $max_width = trim($size[0]);
+  $max_height = trim($size[1]);
+  $bin_path = flashvideo_variable_get(NULL, 'flashvideo_binpath', '/usr/bin/ffmpeg');
+
+  // Let's get current size info by running an input-only ffmpeg command.
+  $movie_info = shell_exec($bin_path .' -i "'. $input_file .'" 2>&1');
+
+  // Extract the current dimensions.
+  $original_dimensions = preg_match('/\bVideo: [^\s]* [^\s]* ([^\r\n]*)x([^\r\n]*)/i', $movie_info, $matches);
+  $original_width = $matches[1];
+  $original_height = $matches[2];
+
+  // Let's only do this if one of the video dimensions is larger than the maximum.
+  if ($original_width > $max_width || $original_height > $max_height) {
+    $aspect_ratio = $original_width/$original_height;
+
+    // Which is the largest dimension?
+    if ($aspect_ratio >= $max_width/$max_height) { // It's wide.
+      $new_width = $max_width;
+      $new_height = round($max_width/$aspect_ratio);
+      if ($new_height % 2 == 0) {
+        // $new_height is an even number.
+      }
+      else {
+        // $new_height is an odd number.  It must be even.  Add 1.
+        $new_height++;
+      }
+    }
+    else { // It's tall.
+      $new_height = $max_height;
+      $new_width = round($max_height*$aspect_ratio);
+      if ($new_width % 2 == 0) {
+        // $new_height is an even number.
+      }
+      else {
+        // $new_height is an odd number.  It must be even.  Add 1.
+        $new_width++;
+      }
+    }
+    $new_dimensions = $new_width .'x'. $new_height;
+    // Add in the size parameter
+    $video_args = str_replace('@output', '-s '. $new_dimensions .' @output', $video_args);
+  }
+
+  return $video_args;
+}
+
+/**
+ * Implementation of hook_cron().
+ * This is now using the more general flashvideo_perform_ffmpeg routine.
+ */
+function flashvideo_cron() {
+
+  // I will use the Cron task to convert all uploaded video's to Flash file format.
+  $types = node_get_types();
+
+  // Iterate through each node type.
+  foreach ($types as $type) {
+
+    // If they have enabled the FlashVideo module for this node type...
+    if (flashvideo_variable_get($type->type, 'enable', 0)) {
+
+      // Check the import directory and add all files to the queue.
+      flashvideo_import(flashvideo_variable_get($type->type, 'import', ($type->type .'_import')), $type->type);
+
+      // First we will want to grab all files that have not been processed yet.
+      $files = db_query("SELECT n.nid, n.type, f.*, fv.flags
+      FROM {files} AS f
+      LEFT JOIN {flashvideo} AS fv ON f.fid = fv.fid
+      LEFT JOIN {node} AS n ON fv.nid = n.nid
+      WHERE (n.type = '%s')
+      AND (fv.oid = fv.fid)
+      AND (fv.status <> %d)
+      AND ((fv.status = %d) OR (fv.flags > 0))",
+      $type->type, FLASHVIDEO_STATUS_CONVERTING, FLASHVIDEO_STATUS_OK);
+
+      $index = 0;
+
+      // The maximum number of conversions allowed per cron cycle.
+      $max_converts    = flashvideo_variable_get(NULL, 'flashvideo_maxconvert', 10);
+
+      // The maximum number of conversion failures.
+      $max_num_failures = flashvideo_variable_get(NULL, 'flashvideo_maxfail', 5);
+
+      // Iterate through all the files in the conversion queue.
+      while (($index < $max_converts) && ($file = db_fetch_object($files))) {
+
+        // See how many failures we have already had with this video.
+        $failures = db_result(db_query("SELECT COUNT(*) FROM {ffmpeg_data} WHERE (fid = %d) AND (status = 0)", $file->fid));
+
+        // If you wish a file to not convert by uploading, you can simply put NOCONVERT anywhere in the name and
+        // the conversion process will be skipped for that file.
+
+        // Check to see if we are allowed to convert this video.
+        if (!strpos($file->filename, 'NOCONVERT') && (($failures < $max_num_failures) || ($max_num_failures == 0))) {
+
+          // Get the default parameters.
+          $params = flashvideo_get_convert_params($type->type);
+
+          // Invoke other modules to allow them to override the conversion parameters.
+          if ($override_params = module_invoke_all('flashvideo_get_params', $file, $file->flags, $params)) {
+            if (count($override_params)) {
+              foreach ($override_params as $param => $value) {
+                $params[$param] = $value;
+              }
+            }
+          }
+
+          // If another module chose to override conversion of the thumbnail...
+          if ($params['create_thumb']) {
+            // Create the Thumbnail.
+            flashvideo_convert($file, $type->type, TRUE,  $params);
+          }
+
+          // If another module chose to override conversion of the video...
+          if ($params['create_video']) {
+            // Create the Flash Video.
+            flashvideo_convert($file, $type->type, FALSE, $params);
+          }
+
+          // Increment the conversion index.
+          $index++;
+        }
+        else {
+          /*
+           * We are unable to convert the video. Not all is lost.  We will just use the original video.
+           * update the status of the file.
+           */
+
+          db_query("UPDATE {flashvideo} SET status=%d, flags=0 WHERE fid=%d", FLASHVIDEO_STATUS_CONVERTED, $file->fid);
+        }
+      }
+    }
+  }
+}
+
+/*
+ * This function takes a path as an argument (within the files directory) and will add all video files to the convert queue.
+ *
+ * @param $path
+ *   A path within the files directory to be used as the import directory.
+ */
+function flashvideo_import($path, $node_type) {
+
+  // Scan for all files in the directory
+  $files = file_scan_directory(file_directory_path() .'/'. $path, '.*');
+
+  // Only continue if there are files.
+  if (count($files)) {
+
+    // Iterate through all files in the convert directory.
+    foreach ($files as $file) {
+      $tempfile = NULL;
+
+      // Create a temporary file object.
+      $tempfile->filepath = $file->filename;
+
+      // Replace the covert directory with blank string so that it will move out of the convert directory.
+      $tempfile->filepath = str_replace($path .'/', '', $tempfile->filepath);
+
+      // Munge up the filename for security reasons.
+      $tempfile->filepath = file_munge_filename($tempfile->filepath, '');
+
+      // Delete potential exploit files for security reasons.
+      if (preg_match('/\.(php|pl|py|cgi|asp|js)$/i', $tempfile->filepath)) {
+        unlink(getcwd() .'/'. $tempfile->filepath);
+        continue;
+      }
+
+      // Move the file from the old path to the new path.
+      if (file_move($file->filename, $tempfile->filepath)) {
+        // Initialize the node variable.
+        $node = NULL;
+
+        // Set the node title
+        $node->title = basename($file->filename);
+
+        // Set the node type.
+        $node->type = $node_type;
+
+        // Set the status, promote, and sticky booleans.
+        $node->status = flashvideo_variable_get($node_type, 'status', 1);
+        $node->promote = 0;
+        $node->sticky = 0;
+
+        // Create our node to hold the file.
+        node_save($node);
+
+        // Get the video dimensions.
+        $size = flashvideo_get_size($node, $tempfile);
+
+        // Get the file extension.
+        $extension = _flashvideo_get_filetype($tempfile->filepath);
+        if ($extension == 'flv') {
+          $filemime = 'application/octet-stream';
+        }
+        else {
+          $filemime = 'video';
+        }
+
+        // Insert the temporary file into the files table.
+        db_query("INSERT INTO {files} (uid, filename, filepath, filemime, filesize, status, timestamp) VALUES (%d, '%s', '%s', '%s', %d, %d, %d)", 1, basename($tempfile->filepath), $tempfile->filepath, $filemime, filesize(getcwd() .'/'. $tempfile->filepath), FILE_STATUS_TEMPORARY, time());
+
+        // Get the file ID from this insertion.
+        $tempfile->fid = db_last_insert_id('files', 'fid');
+
+        // Insert the new file into the appropriate tables.
+        if (module_exists('filefield') && flashvideo_variable_get(NULL, 'flashvideo_filefield', 0)) { // Using FileField
+          // Names of the different video fields? Ask CCK for the details.
+          $cck_original_video_field = content_fields(flashvideo_variable_get($node_type, 'cck_original_video_field', ''), $node_type);
+          // Ask CCK for db info about the fields (table names and column info)
+          $cck_original_video_field_db_info = content_database_info($cck_original_video_field);
+          
+          // For single-upload file fields
+          if ($cck_original_video_field['db_storage'] == 1) {
+            db_query("UPDATE {". $cck_original_video_field_db_info['table'] ."} SET ". $cck_original_video_field_db_info['columns']['fid']['column'] ." = %d, ". $cck_original_video_field_db_info['columns']['list']['column'] ." = 0 WHERE nid = %d", $tempfile->fid, $node->nid);
+          }
+          else { // For multi-upload file fields
+            // Get rid of the initial NULL entry.
+            db_query("DELETE FROM {". $cck_original_video_field_db_info['table'] ."} WHERE nid = %d AND ". $cck_original_video_field_db_info['columns']['fid']['column'] ." IS NULL", $node->nid);
+            db_query("INSERT INTO {". $cck_original_video_field_db_info['table'] ."} (vid, nid, delta, ". $cck_original_video_field_db_info['columns']['fid']['column'] .", ". $cck_original_video_field_db_info['columns']['list']['column'] .") VALUES (%d, %d, %d, %d, 0)", $node->nid, $node->nid, 0, $tempfile->fid);
+          }
+        }
+        else { // They're using the core Upload module.
+          db_query("INSERT INTO {upload} (fid, nid, vid, description, list) VALUES (%d, %d, %d, '%s', %d)", $tempfile->fid, $node->nid, $node->vid, '', flashvideo_variable_get($node->type, 'attachment', 0));
+        }
+        db_query("INSERT INTO {flashvideo} (fid, nid, oid, status, video_index, width, height, flags) VALUES (%d, %d, %d, %d, %d, %d, %d, %d)",  $tempfile->fid, $node->nid, $tempfile->fid, FLASHVIDEO_STATUS_OK, 0, $size['width'], $size['height'], 0);
+
+        // Set the files status to permanent.
+        file_set_status($tempfile, FILE_STATUS_PERMANENT);
+      }
+    }
+  }
+}
+
+/**
+ * Returns the width and height of the given video in pixels.
+ *
+ * @param $node
+ *   A standard Drupal node object.
+ *
+ * @param $file
+ *   A standard Drupal file object
+ *
+ * @return
+ *   An array consisting of the width and height fo the video specified by the file path given.
+ */
+function flashvideo_get_size($node, $file = NULL) {
+
+  // If the file is valid, and they wish to use FFMPEG-PHP to get the dimensions...
+  if ($file && flashvideo_variable_get(NULL, 'flashvideo_ffmpegphp', 0)) {
+
+    // Set up the extension of the FFMPEG-PHP library.
+    $extension = "ffmpeg";
+
+    // Get the *.so name of FFMPEG-PHP library.
+    $extension_soname = $extension .'.'. PHP_SHLIB_SUFFIX;
+
+    // Get the full name for the FFMPEG-PHP library.
+    $extension_fullname = PHP_EXTENSION_DIR .'/'. $extension_soname;
+
+    // Check to see if the extension is loaded.
+    if (!extension_loaded($extension)) {
+
+      // If not, then load the extension.
+      dl($extension_soname);
+
+      // Set the CWD filepath of the file to be tested.
+      $filepath = getcwd() .'/'. $file->filepath;
+
+      // Create the FFMPEG-PHP movie object.
+      $movie = new ffmpeg_movie($filepath);
+    }
+  }
+
+  // If the file exists and the FFMPEG-PHP movie object exists...
+  if ($file && isset($movie)) {
+
+    // Get the width and height from the $movie object.
+    $width = $movie->getFrameWidth();
+    $height = $movie->getFrameHeight();
+  }
+  else {
+
+    // Otherwise, just extract the width and height from the user variable.
+    $size = explode('x', drupal_strtolower(flashvideo_variable_get($node->type, 'size', '450x337')));
+    $width = trim($size[0]);
+    $height = trim($size[1]);
+  }
+
+  // Return the width and height of the video.
+  return array('width' => $width, 'height' => $height);
+}
+
+/**
+ * Link into the operations of the upload module for file insertion and deletion.
+ *
+ * @param $node
+ *   A standard Drupal node object.
+ */
+function _flashvideo_update_files($node) {
+
+  // Set the video index to zero.
+  $video_index = 0;
+
+  if (module_exists('filefield') && flashvideo_variable_get(NULL, 'flashvideo_filefield', 0)) {
+    // Names of the different video fields? Ask CCK for the details.
+    $cck_original_video_field = content_fields(flashvideo_variable_get($node->type, 'cck_original_video_field', ''), $node->type);
+    $cck_finished_video_field = content_fields(flashvideo_variable_get($node->type, 'cck_finished_video_field', ''), $node->type);
+    $cck_finished_thumbnail_field = content_fields(flashvideo_variable_get($node->type, 'cck_finished_thumbnail_field', ''), $node->type);
+    // Ask CCK for db info about the fields (table names and column info)
+    $cck_original_video_field_db_info = content_database_info($cck_original_video_field);
+    $cck_finished_video_field_db_info = content_database_info($cck_finished_video_field);
+    $cck_finished_thumbnail_field_db_info = content_database_info($cck_finished_thumbnail_field);
+    // If they removed at least one file from the node...
+    if (count($node->$cck_original_video_field['field_name']) < count($node->$cck_finished_video_field['field_name'])) {
+      // Figure out which file(s) was removed.
+      $removed_files = db_query("SELECT * FROM {flashvideo} WHERE fid NOT IN (SELECT fid FROM {files}) AND nid = %d", $node->nid);
+      while ($removed_file = db_fetch_object($removed_files)) {
+        // Find the files referenced by this file being removed.
+        $files = db_query("SELECT * FROM {flashvideo} fv LEFT JOIN {files} f ON f.fid=fv.fid WHERE fv.oid = %d", $removed_file->fid);
+        // Delete the file record from the flashvideo tables.
+        db_query("DELETE FROM {ffmpeg_data} WHERE fid = %d", $removed_file->fid);
+        db_query("DELETE FROM {flashvideo} WHERE oid = %d", $removed_file->fid);
+        // Iterate through all the files removed from the node.
+        while ($oldfile = db_fetch_object($files)) {
+          // Delete that file from the files and CCK content type tables as well as from the file system.
+          db_query("DELETE FROM {files} WHERE fid = %d", $oldfile->fid);
+          // For single-upload file fields
+          if ($cck_original_video_field['db_storage'] == 1) {
+            db_query("UPDATE {". $cck_original_video_field_db_info['table'] ."} SET ". $cck_original_video_field_db_info['columns']['fid']['column'] ." = NULL, ". $cck_original_video_field_db_info['columns']['list']['column'] ." = NULL, ". $cck_finished_video_field_db_info['columns']['fid']['column'] ." = NULL, ". $cck_finished_video_field_db_info['columns']['list']['column'] ." = NULL, ". $cck_finished_thumbnail_field_db_info['columns']['fid']['column'] ." = NULL, ". $cck_finished_thumbnail_field_db_info['columns']['list']['column'] ." = NULL WHERE nid = %d", $node->nid);
+          }
+          else { // For multi-upload file fields
+            db_query("DELETE FROM {". $cck_original_video_field_db_info['table'] ."} WHERE ". $cck_original_video_field_db_info['columns']['fid']['column'] ." = %d", $oldfile->fid);
+            db_query("DELETE FROM {". $cck_finished_video_field_db_info['table'] ."} WHERE ". $cck_finished_video_field_db_info['columns']['fid']['column'] ." = %d", $oldfile->fid);
+            db_query("DELETE FROM {". $cck_finished_thumbnail_field_db_info['table'] ."} WHERE ". $cck_finished_thumbnail_field_db_info['columns']['fid']['column'] ." = %d", $oldfile->fid);
+          }
+          file_delete($oldfile->filepath);
+          module_invoke_all('flashvideo_delete_file', $oldfile, $node->type);
+        }
+        // Need to adjust indexes now that a file has been removed.
+        // Look in the flashvideo table for rows that have a video_index that is 1 higher than the one deleted. Update those and decrease by one.
+        $new_index = $removed_file->video_index + 1;
+        $sql = db_query("SELECT * FROM {flashvideo} WHERE nid = %d and video_index = %d", $node->nid, $new_index);
+        while ($one_higher_index_file = db_fetch_object($sql)) {
+          db_query("UPDATE {flashvideo} SET video_index = %d WHERE nid = %d AND fid = %d", $removed_file->video_index, $node->nid, $one_higher_index_file->fid);
+        }
+      }
+      cache_clear_all('content:'. $newfile->nid .':'. $newfile->vid, 'cache_content'); // Clear the CCK cache for this node.
+    }
+    // Make sure that they uploaded some files to the "original" field.
+    elseif (!empty($node->$cck_original_video_field['field_name'])) {
+      // Initialize new index of the video.
+      $result = db_query("SELECT DISTINCT video_index FROM {flashvideo} WHERE nid = %d ORDER BY video_index ASC", $node->nid);
+      while ($row = db_fetch_object($result)) {
+        $video_index = $row->video_index + 1;
+      }
+      // Iterate through all of the files.
+      foreach ($node->$cck_original_video_field['field_name'] as $file) {
+        // Convert the file to a file object.
+        $file = (object)$file;
+        // Only continue if it is a video
+        if (_flashvideo_get_mime_type($file->filepath) !== FALSE) {
+          // Is this file already part of the flashvideo table?
+          $found = db_result(db_query("SELECT count(*) FROM {flashvideo} WHERE fid=%d", $file->fid));
+          // Only add if the file is a video and is not already in our flashvideo table.
+          if (!$found) {
+            // Get the size of the video.  Width and Height.
+            $size = flashvideo_get_size($node, $file);
+            // See if we need to adjust the index to account for previously-uploaded videos.
+            $video_index = (!empty($node->$cck_finished_video_field['field_name']) && is_array($node->$cck_finished_video_field['field_name'])) ? count($node->$cck_finished_video_field['field_name']) - 1 : $video_index;
+            // Now insert our flashvideo into our table.
+            db_query("INSERT INTO {flashvideo} (fid, nid, oid, status, video_index, width, height, flags) VALUES (%d, %d, %d, %d, %d, %d, %d, %d)", $file->fid, $node->nid, $file->fid, FLASHVIDEO_STATUS_OK, $video_index, $size['width'], $size['height'], 0);
+             // If we don't want to wait for cron, call it immediately.
+            if (flashvideo_variable_get($node->type, 'convert', 0)) {
+              flashvideo_cron();
+            }
+          }
+          // Increment the video index.
+          $video_index++;
+        }
+      }
+    }
+  }
+  elseif (isset($node->files) && count($node->files)) { // Make sure that they uploaded some files.
+
+    // Iterate through all of the files.
+    foreach ($node->files as $file) {
+
+      // Convert the file to a file object.
+      $file = (object)$file;
+
+      // If they wanted to remove the file from the node.
+      if (!empty($file->remove)) {
+
+        // Find the files referenced by this file being removed.
+        $files = db_query("SELECT * FROM {flashvideo} fv LEFT JOIN {files} f ON f.fid=fv.fid WHERE fv.oid = %d", $file->fid);
+
+        // Delete the file record from the flashvideo tables.
+        db_query("DELETE FROM {ffmpeg_data} WHERE fid = %d", $file->fid);
+        db_query("DELETE FROM {flashvideo} WHERE oid = %d", $file->fid);
+
+        // Iterate through all the files removed from the node.
+        while ($oldfile = db_fetch_object($files)) {
+
+          // Delete that file from the files and upload tables as well as from the file system.
+          db_query("DELETE FROM {files} WHERE fid = %d", $oldfile->fid);
+          db_query("DELETE FROM {upload} WHERE fid = %d", $oldfile->fid);
+          file_delete($oldfile->filepath);
+          module_invoke_all('flashvideo_delete_file', $oldfile, $node->type);
+        }
+      }
+      else {
+
+        // Only continue if it is a video
+        if (_flashvideo_get_mime_type($file->filepath) !== FALSE) {
+
+          // Is this file already part of the flashvideo table?
+          $found = db_result(db_query("SELECT count(*) FROM {flashvideo} WHERE fid=%d", $file->fid));
+
+          // Only add if the file is a video and is not already in our flashvideo table.
+          if (!$found) {
+
+            // Get the size of the video.  Width and Height.
+            $size = flashvideo_get_size($node, $file);
+
+            // Set the list variable dependant on if we wish our video to show up in the files list or not.
+            db_query("UPDATE {upload} SET list=%d WHERE fid=%d",  flashvideo_variable_get($node->type, 'attachment', 0), $file->fid);
+
+            // Now insert our flashvideo into our table.
+            db_query("INSERT INTO {flashvideo} (fid, nid, oid, status, video_index, width, height, flags) VALUES (%d, %d, %d, %d, %d, %d, %d, %d)", $file->fid, $node->nid, $file->fid, FLASHVIDEO_STATUS_OK, $video_index, $size['width'], $size['height'], 0);
+
+             // If we don't want to wait for cron, call it immediately.
+            if (flashvideo_variable_get($node->type, 'convert', 0)) {
+              flashvideo_cron();
+            }
+          }
+
+          // Increment the video index.
+          $video_index++;
+        }
+      }
+    }
+  }
+  else {
+    // If not, then make sure that all files from FlashVideo are cleared out.
+    $files = db_query("SELECT * FROM {flashvideo} WHERE nid=%d", $node->nid);
+    while ($file = db_fetch_object($files)) {
+      db_query("DELETE FROM {flashvideo} WHERE fid=%d", $file->fid);
+      db_query("DELETE FROM {ffmpeg_data} WHERE fid=%d", $file->fid);
+    }
+  }
+}
+
+/**
+ *  This function will search for a filepath, trying several commons paths.
+ *
+ * @param  $filepath
+ *   The filepath to use to find the REAL filepath.
+ *
+ * @param  $node_type
+ *   The node type.
+ *
+ * @return
+ *   A string of the REAL filepath of the file. FALSE if it can't find the file.
+ */
+function _flashvideo_get_filepath($filepath, $node_type) {
+
+  // Does the file exist?
+  if (!file_exists(getcwd() .'/'. $filepath)) {
+
+    // Try another path.
+    $filepath = file_create_path($filepath);
+
+    // Does this file exist?
+    if (!file_exists(getcwd() .'/'. $filepath)) {
+
+      // Get the base filename.
+      $filename = basename($filepath);
+
+      // Get the output directory.
+      $output_dir = flashvideo_variable_get($node_type, 'outputdir', '');
+      $output_dir = ($output_dir == '') ? '' : $output_dir .'/';
+
+      // Try another path.
+      $filepath = file_create_path($output_dir . $filename);
+
+      // Does this file exist?
+      if (!file_exists(getcwd() .'/'. $filepath)) {
+
+        // Set the filepath to FALSE.
+        $filepath = FALSE;
+      }
+    }
+  }
+
+  return $filepath;
+}
+
+/**
+ *  Given a node variable, and index, this will return a video thumbnail.
+ *
+ *  @param stdObject $node
+ *   A standard Drupal node object.
+ *
+ *  @param array $params
+ *   An array of optional parameters:
+ *    index => Integer video index
+ *    node => stdObject video node
+ *    fids => String of File ID's to play in the format '34-21-35'
+ *    file => The file name of the file you wish to show.  Path is relative to the system files Directory.
+ *    autostart => String 'true' or 'false' to automatically play the video
+ *    width => Integer video width in pixels
+ *    height => Integer video height in pixels
+ *    id => String YouTube or Google Video ID
+ *
+ *  @param boolean $file_only
+ *   Determine the type of output returned (see below).
+ *
+ *  @return String
+ *   If $file_only is TRUE, return path to thumbnail file.
+ *   If $file_only is FALSE, return HTML code.
+ */
+function flashvideo_get_thumbnail($node, $params = array(), $file_only = FALSE) {
+  global $base_url;
+
+  // Set our Video Index
+  $index = isset($params['index']) ? $params['index'] : 0;
+
+  // Set our Video Node
+  $nid = (isset($params['node']) && $params['node'] != 0) ? $params['node'] : $node->nid;
+
+  // Set the File ID's
+  $fids = (isset($params['fids'])) ? $params['fids'] : '';
+
+  // Set the File Path.
+  $filepath = (isset($params['file'])) ? $params['file'] : '';
+
+  $width = (isset($params['width']) && $params['width'] > 0) ? $params['width'] : '';
+  $height = (isset($params['height']) && $params['height'] > 0) ? $params['height'] : '';
+
+  $url = '';
+  $image = '';
+
+  // Get the node type.
+  $node_type = ($node->type) ? $node->type : db_result(db_query("SELECT type FROM {node} WHERE (nid = %d)", $nid));
+
+  // Do they want their thumbnail to be a link?
+  $thumb_link = flashvideo_variable_get($node_type, 'thumblink', 'yes');
+  $thumb_file = new stdClass();
+
+  // If they provided an ID, then we will just need to show the third party thumbnail.
+  if (isset($params['id']) && $params['id'] != '') {
+
+    // They provided an ID, which means they just want to show a Google or YouTube Video.
+    switch (_flashvideo_get_filetype()) {
+
+      // A YouTube thumbnail
+      case 'youtube':
+        $url = 'http://img.youtube.com/vi/'. $params['id'] .'/2.jpg';
+        break;
+      case 'google':
+        break;
+      default:
+        break;
+    }
+  }
+
+  // If they provided the filepath
+  elseif ($filepath != '') {
+
+    // Get the file path and check to make sure it exists.
+    if ($filepath = _flashvideo_get_filepath($filepath, $node_type)) {
+
+      // If so, then set our filepath and break out.
+      $url = check_url(file_create_url($filepath));
+    }
+  }
+
+  // If they provided some File ID's to reference the video with.
+  elseif ($fids != '') {
+
+    // Extract all the File ID's into an array of ID's.
+    $fids = explode("-", $fids);
+
+    // Trim all the elements
+    array_walk($fids, create_function('&$n', '$n = trim($n);'));
+
+    // If they provided only one File ID
+    if (count($fids) == 1) {
+
+      // Find the thumbnail associated with this file ID.
+      $thumb_file = db_fetch_object(db_query("SELECT filepath,fid FROM {files} WHERE (fid = %d) AND (filemime='jpg')", $fids));
+    }
+  }
+  else {
+
+    // They didn't provide any File Name or File ID's.  We will use the node, and index to find their video.
+    $thumb_file = flashvideo_get_thumbnail_file($nid, $index);
+  }
+
+  if ($thumb_file->filepath) {
+    // Give other modules a chance to overwrite this file.
+    if (!($url = module_invoke_all('flashvideo_get_file', $thumb_file, $node_type))) {
+      $url = check_url(file_create_url($thumb_file->filepath));
+    }
+    else {
+      $url = $url['file'];
+    }
+  }
+
+  // Grab the thumbnail from the theme
+  $image = theme('flashvideo_thumbnail', ($thumb_link == 'yes'), $url, $nid, $width, $height);
+
+  // Return the thumbnail.
+  if ($file_only) {
+    return $url;
+  }
+  else {
+    return $image;
+  }
+}
+
+/*
+ * This will return all accepted mime types for a flash video.
+ *
+ * @return
+ *   An array of all accepted mime types.
+ */
+function flashvideo_get_mimetypes() {
+  // Get the mime types string.
+  $mimestring = flashvideo_variable_get(NULL, 'flashvideo_mimetypes', FLASHVIDEO_MIMETYPE_STRING);
+
+  // Split the mimetype phrase into an array.
+  return preg_split("/[\s,]+/", $mimestring);
+}
+
+/*
+ * Given a mime type, this will let you know if the file is a flash file or not.
+ *
+ * @param  $filemime
+ *   A string of the mime type to check for validity.
+ *
+ * @return
+ *   TRUE - The given mimetype is valid.
+ *   FALSE - The given mimetype is not valid.
+ */
+function flashvideo_is_flash($filemime) {
+
+  // Get the mimetypes
+  $mimetypes = flashvideo_get_mimetypes();
+
+  // If they specified any mimetypes.
+  if (count($mimetypes)) {
+
+    // Iterate through each of the mimetypes.
+    foreach ($mimetypes as $mimetype) {
+
+      // If the passed mimetype matches the given mimetype.
+      if ($filemime == $mimetype) {
+        return TRUE;
+      }
+    }
+  }
+
+  return FALSE;
+}
+
+/*
+ * This will return the SQL query to determine if the file is a Flash Video.
+ *
+ * @return
+ *   SQL chunk query to test for all allowed flash mimetypes.
+ */
+function flashvideo_get_flash_query() {
+
+  // Get the mimetypes.
+  $mimetypes = flashvideo_get_mimetypes();
+  $index = 0;
+  $query = "";
+
+  // If they specified any mimetypes.
+  if (count($mimetypes)) {
+
+    // Start off the query.
+    $query .= "(";
+
+    // Iterate through all of the mimetypes.
+    foreach ($mimetypes as $mimetype) {
+
+      // Add an OR statement only if this is not the first one.
+      $query .= ($index > 0) ? "OR " : "";
+
+      // Add the SQL mimetype check.
+      $query .= "f.filemime = '$mimetype' ";
+
+      // Increment our index counter.
+      $index++;
+    }
+
+    // Close off our query.
+    $query .= ")";
+  }
+  return $query;
+}
+
+/**
+ * Function to check to see if a node has a video attached to it.
+ */
+function flashvideo_does_video_exist($node, $params = array()) {
+  $video = flashvideo_get_video_object($node, $params);
+  return (isset($video['file']) ? TRUE : FALSE);
+}
+
+/*
+ * Given a node and some parameters, this will return a video object.
+ *
+ *  @param stdObject $node
+ *  A node object.
+ *
+ *  @param array $params
+ *  An array of optional parameters:
+ *    index => Integer video index
+ *    node => stdObject video node
+ *    fids => String of File ID's to play in the format '34-21-35'
+ *    file => The file name of the file you wish to show.  Path is relative to the system files Directory.
+ *    autostart => String 'true' or 'false' to automatically play the video
+ *    width => Integer video width in pixels
+ *    height => Integer video height in pixels
+ *    id => String YouTube or Google Video ID
+ *
+ *  @param boolean $file_only
+ *  Determine the type of output returned (see below).
+ *
+ *  @return String
+ *  If $file_only is TRUE, return path to video file.
+ *  If $file_only is FALSE, return HTML code.
+ *
+ */
+function flashvideo_get_video($node, $params = array(), $file_only = FALSE) {
+  $video = flashvideo_get_video_object($node, $params);
+
+  // If a video file is defined, return the video object.
+  if (isset($video['file'])) {
+    return ($file_only ? $video['file'] : flashvideo_play($video));
+  }
+  else {
+    //$url = base_path() . drupal_get_path('module', 'flashvideo') .'/video_MIA.png';
+    //return ($file_only ? $url : '<img src="'. $url .'" alt="video unavailable" />');
+    return '';
+  }
+}
+
+/*
+ * Given a node and some parameters, this will return a video object.
+ *
+ *  @param stdObject $node
+ *  A node object.
+ *
+ *  @param array $params
+ *  An array of optional parameters:
+ *    index => Integer video index
+ *    node => stdObject video node
+ *    fids => String of File ID's to play in the format '34-21-35'
+ *    file => The file name of the file you wish to show.  Path is relative to the system files Directory.
+ *    autostart => String 'true' or 'false' to automatically play the video
+ *    width => Integer video width in pixels
+ *    height => Integer video height in pixels
+ *    id => String YouTube or Google Video ID
+ *
+ *  @param boolean $file_only
+ *  Determine the type of output returned (see below).
+ *
+ *  @return Object
+ *  $video object
+ *
+ */
+function flashvideo_get_video_object($node, $params = array()) {
+  global $base_url;
+
+  // Set our Video Index
+  $index = isset($params['index']) ? $params['index'] : 0;
+
+  // Set out node ID.
+  $nid = (isset($params['node']) && $params['node']) ? $params['node'] : $node->nid;
+
+  // Set the File ID's
+  $fids = isset($params['fids']) ? $params['fids'] : '';
+
+  // Set the File Path.
+  $filepath = (isset($params['file'])) ? $params['file'] : '';
+
+  // Get the flash mime type query.
+  $flashmime = flashvideo_get_flash_query();
+  $video = array();
+  $video['node_type'] = ($node->type) ? $node->type : db_result(db_query("SELECT type FROM {node} WHERE (nid = %d)", $nid));
+  $video['autostart'] = (isset($params['autostart'])) ? $params['autostart'] : flashvideo_variable_get($video['node_type'], 'autostart', 'true');
+  $video['width'] = (isset($params['width']) && $params['width'] > 0) ? $params['width'] : '';
+  $video['height'] = (isset($params['height']) && $params['height'] > 0) ? $params['height'] : '';
+  $video['flashvars'] = $params['flashvars'];
+  $video_file = NULL;
+
+  // If they want an intro or outro video.
+  $intro_video = flashvideo_variable_get($video['node_type'], 'intro', '');
+  $outro_video = flashvideo_variable_get($video['node_type'], 'outro', '');
+
+  // If they provided an ID.
+  if (isset($params['id']) && $params['id'] != '') {
+    // Set the filepath to the Parameters ID.
+    $video['file'] = $params['id'];
+  }
+
+  // If they wan't to show all the videos in the node in a playlist fashion, they can say "fids=node".
+  elseif ($fids == 'node') {
+    // Set up the fids to be an array.
+    $fids = array();
+
+    // Select all File ID's from that node.
+    $sql = "SELECT f.fid FROM {flashvideo} fv LEFT JOIN {files} f ON f.fid = fv.fid WHERE $flashmime AND (fv.status=%d) AND (fv.nid=%d)";
+
+    $result = db_query($sql, FLASHVIDEO_STATUS_CONVERTED, $nid);
+
+    // Iterate through all of the files and set up the fids array.
+    while ($fid = db_fetch_object($result)) {
+      $fids[] = $fid->fid;
+    }
+  }
+
+  // If they provided some fids.
+  elseif ($fids != '') {
+    // Set up the file ID array based off the fids string.
+    $fids = (strpos($fids, "-") === FALSE) ? $fids : explode("-", $fids);
+    // If they only provided one File ID.
+    if (count($fids) == 1) {
+      // Find the video file from this one file ID.
+      $sql ="SELECT fv.oid, f.filepath, fv.width, fv.height, f.fid FROM {flashvideo} fv LEFT JOIN {files} f ON f.fid = fv.fid WHERE $flashmime AND (fv.status = %d) AND (f.fid = %d)";
+      $video_file = db_fetch_object(db_query($sql, FLASHVIDEO_STATUS_CONVERTED, $fids));
+    }
+  }
+  // If they provided the filepath to the video.
+  elseif ($filepath != '') {
+
+    // Get the file extension.
+    $extension = _flashvideo_get_filetype($filepath);
+    // See if the filepath exists.
+    $filepath = _flashvideo_get_filepath($filepath, $video['node_type']);
+    // Only continue if they specify a video file.
+    if ($filepath && ($extension == 'flv'||$extension == 'mp4'))  {
+      // Find the video file in the flashvideo table.
+      $sql = "SELECT fv.oid, f.filepath, fv.width, fv.height, f.fid FROM {flashvideo} fv LEFT JOIN {files} f ON f.fid = fv.fid WHERE $flashmime AND (fv.status = %d) AND (f.filepath = '%s')";
+      $video_file = db_fetch_object(db_query($sql, FLASHVIDEO_STATUS_CONVERTED, $filepath));
+      if (!$video_file) {
+        // Fail safe. Look for any video.
+        $video_file->filepath = $filepath;
+      }
+    }
+  }
+
+  // Default case. They provided the node ID and the video index.
+  else {
+    // They didn't provide any File ID's.  We will use the node, and index to find their video.
+    if (module_exists('filefield') && flashvideo_variable_get(NULL, 'flashvideo_filefield', 0)) { // Using FileField
+      $video_file = flashvideo_get_video_file($nid, $index);
+    }
+    else { // They're using the core Upload module.
+      $vid_query = $node->vid ? " AND (u.vid = %d)" : " AND (u.vid <> %d)";
+      if ($nid != $node->nid) { // They're referencing a video from another node.
+        $vid_query = '';
+      }
+      $sql = "SELECT fv.oid, f.filepath, fv.width, fv.height, f.fid FROM {flashvideo} fv
+             LEFT JOIN {files} f ON f.fid = fv.fid
+             LEFT JOIN {upload} u on u.fid = fv.fid
+             WHERE $flashmime AND (fv.status = %d) AND (fv.nid = %d) AND (fv.video_index = %d)$vid_query";
+      $video_file = db_fetch_object(db_query($sql, FLASHVIDEO_STATUS_CONVERTED, $nid, $index, $node->vid));
+    }
+  }
+
+  // Assign a variable to reference the original video.
+  if (flashvideo_variable_get($video['node_type'], 'downloadfile', 0)) {
+    $sql = "SELECT f.filepath FROM {flashvideo} fv LEFT JOIN {files} f ON f.fid = fv.fid WHERE (f.fid = %d)";
+    $video['original_video'] = db_result(db_query($sql, $video_file->oid));
+  }
+  // If no video file was defined...
+  if (!isset($video['file'])) {
+    // Do we need to use the playlist?
+    if (($intro_video || $outro_video || count($fids) > 1)) {
+      // Set up our video['file']
+      $video['file'] = $base_url .'/index.php?q=getplaylist/';
+      // Get our arguments.
+      $fids = (isset($video_file->fid) && $video_file->fid) ? $video_file->fid : $fids;
+
+      // If there are some $fids, continue.
+      if ($fids) {
+        // Are the fids provided in an array.
+        if (is_array($fids)) {
+          // Trim all the elements.
+          array_walk($fids, create_function('&$n', '$n = trim($n);'));
+          // Append the arguments as a string to the video file playlist path.
+          $video['file'] .= implode("-", $fids);
+        }
+        else {
+          // Trim the fid.
+          $fids = trim($fids);
+          // Set up our arguments.
+          $video['file'] .= $fids;
+        }
+      }
+    }
+    // If a video path was provided.
+    elseif (isset($video_file->filepath)) {
+      // Give other modules a chance to override this path.
+      if (!($temp_video = module_invoke_all('flashvideo_get_file', $video_file, $node->type))) {
+        // Set up our video['file'] variable.
+        $video['file'] = check_url(file_create_url($video_file->filepath));
+      }
+      else {
+        $video['file'] = $temp_video['file'];
+        $video['override'] = TRUE;
+      }
+    }
+  }
+
+  // If they haven't already provided width and height.
+  if (!($video['width'] && $video['height'])) {
+    // If the width and height were provided by the $video_file.
+    if (isset($video_file->width) && isset($video_file->height)) {
+      // Set our video['width'] and video['height']
+      $video['width'] = $video_file->width;
+      $video['height'] = $video_file->height;
+    }
+    // We will just want to use the defaults if none was provided.
+    else {
+      $node->type = $video['node_type'];
+      $size = flashvideo_get_size($node);
+      $video['width'] = $size['width'];
+      $video['height'] = $size['height'];
+    }
+  }
+
+  return $video;
+}
+
+/**
+ * Retrieves the converted flashvideo file object given the node Id and the index of the video.
+ */
+function flashvideo_get_video_file($nid, $index) {
+  $flashmime = flashvideo_get_flash_query();
+  $sql = "SELECT fv.oid, f.filepath, fv.width, fv.height, f.fid FROM {flashvideo} fv
+            LEFT JOIN {files} f ON f.fid = fv.fid
+            WHERE $flashmime AND (fv.status = %d) AND (fv.nid = %d) AND (fv.video_index = %d)";
+  return db_fetch_object(db_query($sql, FLASHVIDEO_STATUS_CONVERTED, $nid, $index));
+}
+
+/**
+ * Retrieves the thumbnail file object given the node Id and the index of the video.
+ */
+function flashvideo_get_thumbnail_file($nid, $index) {
+  $sql = "SELECT f.filepath,f.fid FROM {flashvideo} fv
+      LEFT JOIN {files} f ON f.fid = fv.fid
+      WHERE (fv.nid = %d) AND (f.filemime='jpg') AND (fv.video_index=%d)";
+  return db_fetch_object(db_query($sql, $nid, $index));
+}
+
+/**
+ * Search and Replace routine.  Scans the body of a node and replaces every tag and its parameters with an object.
+ *
+ *  @param $node
+ *   The node which is being searched
+ *
+ *  @param $tag
+ *   The tag to search for.
+ *
+ */
+function _flashvideo_replace_tags(&$node, $tag) {
+  // Set the body to be modified.
+  $body = (isset($node->teaser) && $node->body == '') ? $node->teaser : $node->body;
+
+  $pattern = '/(!?)\[' . $tag . '(?:\s*:\s*([^=]+)=([^:\]]+))*\]/i';
+  $offset = 0;
+  while (preg_match($pattern, $body, $match, PREG_OFFSET_CAPTURE, $offset) == 1) {
+    // each match in $match consists of [ $matched_text, $offset ]
+    // $match[0] is the whole match
+    // $match[1] is the character before the [
+    // $match[n], $match[n+1] are parameter and value pairs (n=2,4,6,8,...)
+
+    $match_start = $match[0][1];
+
+    if ($match[1][0]=='!') {
+      //if the tag was escaped with a !, just remove the ! and skip over the tag
+      $match_length = 1;
+      $match_replacement = "";
+      $offset = $match_start + strlen($match[0][0]) - 1;
+    }
+    else {
+      $match_length = strlen($match[0][0]);
+
+      // Initialize our parameters array.
+      $params = array();
+      $maxi = count($match);
+      for ($i=2; $i<$maxi; $i=$i+2) {
+        $params[$match[$i][0]] = $match[$i+1][0];
+      }
+      
+      // Set the object based on the parameters given.
+      $object = ($tag == 'thumbnail') ? flashvideo_get_thumbnail($node, $params) : flashvideo_get_video($node, $params);
+
+      // Replace this tag with the real object code
+      $match_replacement = $object;
+      $offset = $match_start + strlen($match_replacement);
+    }
+
+    $body = substr_replace($body, $match_replacement, $match_start, $match_length);
+  }
+
+  // Set the teaser or the body depending on which one is being shown.
+  if ((isset($node->teaser) && $node->body == ''))
+    $node->teaser = $body;
+  else
+    $node->body = $body;
+}
+
+/**
+ * Implementation of hook_nodeapi().
+ */
+function flashvideo_nodeapi(&$node, $op, $teaser) {
+
+  // Only if the node type is enabled.
+  if (flashvideo_variable_get($node->type, 'enable', 0)) {
+    switch ($op) {
+      case 'insert':
+      case 'update':
+        _flashvideo_update_files($node);
+        break;
+      case 'prepare':
+        if (module_exists('filefield') && flashvideo_variable_get(NULL, 'flashvideo_filefield', 0)) {
+          if (flashvideo_variable_get($node->type, 'cck_original_video_field', '') == '' || flashvideo_variable_get($node->type, 'cck_finished_video_field', '') == '' || flashvideo_variable_get($node->type, 'cck_finished_thumbnail_field', '') == '') {
+            drupal_set_message(t('Warning: The required file fields are not yet defined for this content type. <br />Please visit the <a href="/admin/settings/flashvideo/edit/') . $node->type . t('">FlashVideo settings for this content type</a> and follow the instructions before proceeding.'), 'error');
+          }
+        }
+        break;
+      case 'presave': // previously this op was known as 'submit' but changed to presave in D6.
+        module_invoke_all('flashvideo_submit', $node, flashvideo_get_convert_params($node->type));
+        break;
+
+      case 'load':
+        // Get the play counter and increment it.
+        $results = db_fetch_object(db_query("SELECT play_counter FROM {flashvideo} WHERE nid = %d", $node->nid));
+        if ($results) {
+          $node->play_counter = $results->play_counter;
+        }
+
+        // Need to add the filefield information for the thumbnail and the converted video to the node object.
+        if (flashvideo_variable_get(NULL, 'flashvideo_filefield', 0)) {
+          $thumb_field_name = flashvideo_variable_get($node->type, 'cck_finished_thumbnail_field', '');
+          if ($thumb_field_name) {
+            $thumb_valid = ($node->{$thumb_field_name}[0]["filepath"] != "");
+            if (!$thumb_valid) {
+              $thumb_file = flashvideo_get_thumbnail_file($node->nid, 0);
+              if ($thumb_file->filepath) {
+                $thumb_valid = TRUE;
+                $thumb_field['filename'] = basename($thumb_file->filepath);
+                $thumb_field['filepath'] = $thumb_file->filepath;
+                $thumb_field['filemime'] = 'image/jpeg';
+                $node->{$thumb_field_name}[0] = $thumb_field;
+              }
+            }
+          }
+
+          $video_field_name = flashvideo_variable_get($node->type, 'cck_finished_video_field', '');
+          if ($video_field_name) {
+            $video_valid = ($node->{$video_field_name}[0]["filepath"] != "");
+            if (!$video_valid) {
+              $video_file = flashvideo_get_video_file( $node->nid, 0 );
+              $video_exists = ($video_file->filepath != "");
+              $video_mime = 'flv-application/octet-stream';
+              if (!$thumb_valid && !$video_exists && !flashvideo_does_video_exist($node)) {
+                $video_exists = TRUE;
+                $video_file->filepath = drupal_get_path('module', 'flashvideo') .'/video_MIA.png';
+                $video_mime = 'image/jpeg';
+              }
+
+              if ($video_exists) {
+                $video_field['filename'] = basename($video_file->filepath);
+                $video_field['filepath'] = $video_file->filepath;
+                $video_field['filemime'] = $video_mime;
+                $node->{$video_field_name}[0] = $video_field;
+              }
+            }
+          }
+        }
+
+        $additions = '';
+        $files = _flashvideo_load($node);
+        if (count($files)) {
+          foreach ($files as $file) {
+            if (($filepath = module_invoke_all('flashvideo_get_file', $file, $node->type))) {
+              $additions['s3files'][$file->fid] = $filepath['file'];
+            }
+          }
+        }
+
+        if ($additions) {
+          return $additions;
+        }
+        break;
+
+      case 'validate':
+        // Only run the attachment validation if they're using the core Upload module.
+        if (!module_exists('filefield') || flashvideo_variable_get(NULL, 'flashvideo_filefield', 0) == FALSE) {
+          // Validate that they provided a file as an attachment.
+          if (flashvideo_variable_get($node->type, 'require', 0)) {
+            if (!is_array($node->files)) {
+              if ($_FILES['files']['error']['upload'] != 0) {
+                form_set_error('files', t('A file upload is required (or there was some other error processing it).'));
+              }
+            }
+          }
+        }
+        break;
+
+      // Here we will do a search and replace for anyone who is using the video and thumbnail tags.
+      case 'alter':
+
+        if (!$teaser) {
+          db_query("UPDATE {flashvideo} SET play_counter = play_counter + 1 WHERE nid = %d", $node->nid); //Increment play counter.
+        }
+
+        if ((!flashvideo_variable_get($node->type, 'disabletag', 0)) &&
+          (!$teaser || flashvideo_variable_get($node->type, 'searchvideo', 0)))
+          _flashvideo_replace_tags($node, 'video');
+
+        if ((!flashvideo_variable_get($node->type, 'disabletag', 0)) &&
+          ($teaser || flashvideo_variable_get($node->type, 'searchthumb', 0)))
+          _flashvideo_replace_tags($node, 'thumbnail');
+
+        break;
+
+      case 'rss item':
+        // Only need help with RSS if they're using the core Upload module.
+        if (!module_exists('filefield') || flashvideo_variable_get(NULL, 'flashvideo_filefield', 0) == FALSE) {
+          // Get the flash mime query.
+          $flashmime = flashvideo_get_flash_query();
+  
+          // Find the filepath of the first video uploaded to this node.
+          $sql ="SELECT f.filepath FROM {flashvideo} fv LEFT JOIN {files} f ON f.fid = fv.fid WHERE (fv.nid = %d) AND $flashmime AND (fv.status = %d) AND (fv.video_index = 0)";
+          $filepath = db_result(db_query($sql, $node->nid, FLASHVIDEO_STATUS_CONVERTED));
+  
+          // Set the URL attributes.
+          $attributes['url'] = check_url(file_create_url($filepath));
+  
+          // Get the filesize and set that in the attributes.
+          $attributes['length'] = filesize(getcwd() .'/'. $filepath);
+  
+          // Get the mime type of this video.
+          $mime_type = _flashvideo_get_mime_type($filepath);
+  
+          // If the mime type was found, then set the attributes.
+          if ($mime_type) {
+            $attributes['type'] = $mime_type;
+          }
+  
+          // Set the URL for the media object.
+          $media['url'] = $attributes['url'];
+  
+          // Set the filesize for the media object.
+          $media['fileSize'] = $attributes['length'];
+  
+          // Set the mime type for the media attribute.
+          $media['type'] = $attributes['type'];
+  
+          // Return an array of what to contribute to this RSS feed.
+          return array(array('key' => 'enclosure', 'attributes' => $attributes), array('key' => 'media', 'value' => '', 'attributes' => $media));
+        }
+        break;
+      case 'delete':
+      case 'delete revision':
+
+        // Delete all entries from the flashvideo table.
+        db_query("DELETE FROM {flashvideo} WHERE nid = %d", $node->nid);
+
+        if (module_exists('filefield') && flashvideo_variable_get(NULL, 'flashvideo_filefield', 0)) {
+          // Names of the different video fields? Ask CCK for the details.
+          $cck_original_video_field = content_fields(flashvideo_variable_get($node->type, 'cck_original_video_field', ''), $node->type);
+          $cck_finished_video_field = content_fields(flashvideo_variable_get($node->type, 'cck_finished_video_field', ''), $node->type);
+          $cck_finished_thumbnail_field = content_fields(flashvideo_variable_get($node->type, 'cck_finished_thumbnail_field', ''), $node->type);
+          // Ask CCK for db info about the fields (table names and column info)
+          $cck_original_video_field_db_info = content_database_info($cck_original_video_field);
+          $cck_finished_video_field_db_info = content_database_info($cck_finished_video_field);
+          $cck_finished_thumbnail_field_db_info = content_database_info($cck_finished_thumbnail_field);
+
+          // Grab all of the files associated with the node.
+          $video_files = array();
+          if (is_array($node->$cck_original_video_field)) {
+            foreach ($node->$cck_original_video_field as $file) {
+              $video_files[] = $file;
+            }
+          }
+          if (is_array($node->$cck_finished_video_field)) {
+            foreach ($node->$cck_finished_video_field as $file) {
+              $video_files[] = $file;
+            }
+          }
+          if (is_array($node->$cck_finished_thumbnail_field)) {
+            foreach ($node->$cck_finished_thumbnail_field as $file) {
+              $video_files[] = $file;
+            }
+          }
+          // If this node had files...
+          if (count($video_files)) {
+            $counties = count($video_files);
+            // Iterate through each file and delete it.
+            foreach ($video_files as $file) {
+              $file = (object)$file;
+              if (basename($file->filepath) != 'video_MIA.png') {
+                db_query("DELETE FROM {ffmpeg_data} WHERE fid = %d", $file->fid);
+                // Delete that file from the files and CCK tables as well as from the file system.
+                db_query("DELETE FROM {files} WHERE fid = %d", $file->fid);
+                // For single-upload file fields
+                if ($cck_original_video_field['db_storage'] == 1) {
+                  db_query("UPDATE {". $cck_original_video_field_db_info['table'] ."} SET ". $cck_original_video_field_db_info['columns']['fid']['column'] ." = NULL, ". $cck_original_video_field_db_info['columns']['list']['column'] ." = NULL, ". $cck_finished_video_field_db_info['columns']['fid']['column'] ." = NULL, ". $cck_finished_video_field_db_info['columns']['list']['column'] ." = NULL, ". $cck_finished_thumbnail_field_db_info['columns']['fid']['column'] ." = NULL, ". $cck_finished_thumbnail_field_db_info['columns']['list']['column'] ." = NULL WHERE nid = %d", $node->nid);
+                }
+                else { // For multi-upload file fields
+                  db_query("DELETE FROM {". $cck_original_video_field_db_info['table'] ."} WHERE nid = %d", $node->nid);
+                  db_query("DELETE FROM {". $cck_finished_video_field_db_info['table'] ."} WHERE nid = %d", $node->nid);
+                  db_query("DELETE FROM {". $cck_finished_thumbnail_field_db_info['table'] ."} WHERE nid = %d", $node->nid);
+                }
+                file_delete($file->filepath);
+                module_invoke_all('flashvideo_delete_file', $file, $node->type);
+              }
+            }
+          }
+        }
+        else { // They're using the core Upload module.
+          // If this node had files...
+          if (isset($node->files) && count($node->files)) {
+            // Iterate through each file and delete them from the ffmpeg_data table.
+            foreach ($node->files as $file) {
+              $file = (object)$file;
+              db_query("DELETE FROM {ffmpeg_data} WHERE fid = %d", $file->fid);
+              // Delete that file from the files and upload tables as well as from the file system.
+              db_query("DELETE FROM {files} WHERE fid = %d", $file->fid);
+              db_query("DELETE FROM {upload} WHERE fid = %d", $file->fid);
+              file_delete($file->filepath);
+              module_invoke_all('flashvideo_delete_file', $file, $node->type);
+            }
+          }
+        }
+        break;
+    }
+  }
+}
+
+/**
+ * Generates the HTML for any object parameters in an embedded video.
+ *
+ * @param $video the node which is being played
+ *
+ * @return
+ *  string with the parameters in HTML form.
+ */
+function _flashvideo_get_parameters(&$video) {
+  // call hook_v_get_params
+  $param_value = module_invoke_all('v_get_params', $video);
+
+  $output = '';
+  foreach ($param_value as $param => $value) {
+    $output .= '<param name="'. check_plain($param) .'" value="'. check_plain($value) .'" />';
+  }
+
+  return $output;
+}
+
+/**
+ * Return array of content filefields for display in configuration forms.
+ */
+function _flashvideo_get_cck_fields($content_type) {
+  $fields = array();
+  // Add in an empty option so that the user has to choose their file field.
+  $fields[''] = '-Select-';
+  $flashvideo_content_fields = _flashvideo_content_fields($content_type);
+  if (is_array($flashvideo_content_fields)) {
+    foreach (_flashvideo_content_fields($content_type) as $field) {
+      // Only display filefields
+      if ($field['type'] == 'filefield') {
+        $fields[$field['field_name']] = $field['widget']['label'];
+      }
+    }
+  }
+  return $fields;
+}
+
+/**
+ * Return a list of all fields applicable to a specific content type.
+ *
+ * @param $content_type_name
+ *   If not empty, return information of the field within the context of this content
+ *   type.
+ */
+function _flashvideo_content_fields($content_type_name = NULL) {
+  $info = _content_type_info(); // CCK function. All information on content types, fields, and related structures.
+  if (isset($info['fields'])) {
+    if (empty($content_type_name)) {
+      return $info['fields'];
+    }
+    else {
+      return $info['content types'][$content_type_name]['fields'];
+    }
+  }
+}
+
+/**
+ * Return a list of all files associated with a node from the FlashVideo table.
+ * This is a recreation of the upload_load function from upload.module.
+ */
+function _flashvideo_load($node) {
+  $files = array();
+  $result = db_query('SELECT * FROM {files} AS f
+    INNER JOIN {flashvideo} AS fv ON f.fid = fv.fid
+    WHERE fv.nid = %d
+    ORDER BY f.fid', $node->nid);
+  while ($file = db_fetch_object($result)) {
+    $files[$file->fid] = $file;
+  }
+  return $files;
+}

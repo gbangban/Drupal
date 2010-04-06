@@ -1,0 +1,43 @@
+<?php
+// $Id: flashvideo_views.module,v 1.2.2.5 2009/03/07 17:53:51 attheshow Exp $
+
+/**
+ * @file
+ * This include file implements Views functionality on behalf of the
+ * flashvideo.module.
+ */
+
+/**
+ * Implementation of hook_views_api().
+ */
+function flashvideo_views_views_api() {
+  return array('api' => 2);
+}
+
+/**
+ * Implementation of hook_help().
+ */
+function flashvideo_views_help($path = 'admin/help#flashvideo_views', $arg) {
+  switch ($section) {
+    case 'admin/help#flashvideo_views':
+      $output = 'The FlashVideo Views module provides a new Field in the Views module that allows you to see the Video or Video Thumbnail.';
+      return $output;
+
+    case 'admin/settings/modules#description':
+      return t('Provides a plugin to allow Views functionality to the FlashVideo Module.');
+  }
+}
+
+/**
+ * Views handler for displaying the video.
+ */
+function flashvideo_views_handler_video($fieldinfo, $fielddata, $value, $data) {
+  $node = node_load($data->nid);
+  switch ($fielddata['options']) {
+    case 0: // Flash Video Player
+      return flashvideo_get_video($node, array());
+    case 1: // Thumbnail Image
+    default:
+      return flashvideo_get_thumbnail($node, array());
+  }
+}

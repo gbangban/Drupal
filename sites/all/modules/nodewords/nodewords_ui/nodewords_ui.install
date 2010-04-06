@@ -1,0 +1,17 @@
+<?php
+// $Id: nodewords_ui.install,v 1.1.2.1 2010/03/21 13:11:24 kiam Exp $
+
+/**
+ * @file
+ * Install, update and uninstall functions for the User interface for Nodewords module.
+ */
+
+/**
+ * Implements hook_install().
+ */
+function nodewords_ui_install() {
+  $value = variable_get('nodewords_edit', NULL);
+  if (isset($value)) {
+    variable_set('nodewords_ui_edit', $value);
+  }
+}

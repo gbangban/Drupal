@@ -1,0 +1,169 @@
+<?php
+// $Id: multichoice.module,v 1.2.2.17 2010/01/27 14:07:55 falcon Exp $
+
+/**
+ * The main file for multichoice.
+ *
+ * Sponsored by: Norwegian Centre for Telemedicine
+ * Code: falcon
+ *
+ * @file
+ * Multiplechoice question type for the Quiz module.
+ *
+ */
+
+/**
+ * Implementation of hook_help().
+ */
+function multichoice_help($path, $args) {
+  if ($path == 'admin/help#multichoice') {
+    return t('This module provides a multiple choice question type for Quiz.');
+  }
+}
+/**
+ * Implementation of hook_quiz_question_info().
+ */
+function multichoice_quiz_question_info() {
+  return array(
+    'multichoice' => array(
+      'name' => t('Multiple choice question'),
+      'description' => t('This provides multiple choice questions for use by the Quiz module.'),
+      'question provider' => 'MultichoiceQuestion',
+      'response provider' => 'MultichoiceResponse',
+      'module' => 'quiz_question', // All wrapper functions are in that module.
+    ),
+  );
+}
+/**
+ * 
+ */
+function multichoice_config() {
+  $form['multichoice_def_num_of_alts'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Default number of alternatives'),
+    '#default_value' => variable_get('multichoice_def_num_of_alts', 2),
+  );
+  return $form;
+}
+
+function multichoice_menu() {
+  $items['multichoice/add_alternative_js'] = array(
+    'page callback' => 'multichoice_add_alternative_js',
+    'type' => MENU_CALLBACK,
+    'access arguments' => array('create quiz'),
+  );
+  return $items;
+}
+
+/**
+ * Implementation of hook_autoload_info().
+ */
+function multichoice_autoload_info() {
+  return array(
+    'MultichoiceQuestion' => array('file' => 'multichoice.classes.inc'),
+    'MultichoiceResponse' => array('file' => 'multichoice.classes.inc'),
+  );
+}
+
+function multichoice_theme($existing, $type, $theme, $path) {
+  return array(
+    'multichoice_creation_form' => array(
+      'arguments' => array(
+        'form' => NULL,
+      ),
+      'path' => drupal_get_path('module', 'multichoice') .'/theme',
+      'file' => 'multichoice.theme.inc',
+    ),
+    'multichoice_alternative_creation' => array(
+      'arguments' => array(
+        'form' => NULL,
+      ),
+      'path' => drupal_get_path('module', 'multichoice') .'/theme',
+      'template' => 'multichoice-alternative-creation',
+    ),
+    'multichoice_alternative' => array(
+      'arguments' => array(
+        'form' => NULL,
+      ),
+      'path' => drupal_get_path('module', 'multichoice') .'/theme',
+      'template' => 'multichoice-alternative',
+    ),
+  );
+}
+
+function multichoice_add_alternative_js() {
+  include_once 'modules/node/node.pages.inc';
+  $form_state = array('storage' => NULL, 'submitted' => FALSE);
+  $form_build_id = $_POST['form_build_id'];
+  // Get the form from the cache.
+  $form = form_get_cache($form_build_id, $form_state);
+  $args = $form['#parameters'];
+  $form_id = array_shift($args);
+  // We will run some of the submit handlers so we need to disable redirecting.
+  $form['#redirect'] = FALSE;
+  // We need to process the form, prepare for that by setting a few internals
+  // variables.
+  $form['#post'] = $_POST;
+  $form['#programmed'] = FALSE;
+  $form_state['post'] = $_POST;
+  // Build, validate and if possible, submit the form.
+  _multichoice_skip_validation($form);
+  drupal_process_form($form_id, $form, $form_state);
+
+  /*if(form_get_errors()) {
+    form_execute_handlers('submit', $form, $form_state);
+  }*/
+  // This call recreates the form relying solely on the form_state that the
+  // drupal_process_form set up.
+  $form = drupal_rebuild_form($form_id, $form_state, $args, $form_build_id);
+  // Render the new output.
+  $i = 0;
+  while (isset($form['alternatives'][$i])) {
+    $i++;
+  }
+  $i--;
+  $new_choice = $form['alternatives'][$i];
+  $new_choice['#collapsed'] = FALSE;
+  $output = form_get_errors() ? '' : drupal_render($new_choice);
+  $status = theme('status_messages');
+  drupal_json(array('status' => TRUE, 'data' => $status . $output));
+}
+
+function multichoice_more_choices_submit($form, &$form_state) {
+  // Set the form to rebuild and run submit handlers.
+  node_form_submit_build_node($form, $form_state);
+  $exists = 0;
+  while (isset($form['alternatives'][$exists])) {
+    $exists++;
+  }
+  // Make the changes we want to the form state.
+  if ($form_state['values']['alternatives']['multichoice_add_alternative']) {
+    $n = $_GET['q'] == 'multichoice/add_alternative_js' ? 1 : 3;
+    $form_state['choice_count'] = $exists + $n;
+  }
+}
+/**
+ * Recursive helper function to set the validated property. (Taken from the skip validation module.)
+ *
+ * @param &$elements
+ *   The elements that are currently being processed.
+ */
+function _multichoice_skip_validation(&$elements) {
+  $elements['#validated'] = TRUE;
+  foreach (element_children($elements) as $key) {
+    _multichoice_skip_validation($elements[$key]);
+  }
+}
+
+/**
+ * Implementation of hook user.
+ */
+function multichoice_user($op, &$edit, &$account, $category = NULL) {
+  switch ($op) {
+    case 'delete':
+      $sql = 'DELETE FROM {quiz_multichoice_user_settings}
+          WHERE uid = %d';
+      db_query($sql, $account->uid);
+    break;
+  }
+}
